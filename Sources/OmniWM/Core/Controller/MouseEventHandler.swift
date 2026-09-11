@@ -5,6 +5,10 @@ import AppKit
 import Foundation
 
 private let niriTouchpadGestureRecognitionThreshold: CGFloat = 16.0
+/// Fingers land staggered by tens of milliseconds, but a contact that joins a touch already under way
+/// (a palm heel settling during a two-finger scroll) is not a gesture. Trackpad gestures may only arm,
+/// or re-arm to a higher finger count, within this long of the first contact landing.
+private let trackpadGestureArmWindow: TimeInterval = 0.15
 // AppKit gives normalized touch positions rather than libinput gesture deltas.
 // This maps normalized movement into the delta space that AnimationDriver later
 // normalizes with gestureWorkingAreaMovement.
@@ -436,6 +440,7 @@ final class MouseEventHandler {
     private func clearGestureLatches() {
         state.suppressGestureStartUntilAllTouchesLift = false
         state.consumeTrackpadScrollUntilAllTouchesLift = false
+        state.gestureTouchDownTimestamp = nil
     }
 
     func suspendMultitouchForSleep() {
@@ -815,16 +820,32 @@ final class MouseEventHandler {
     }
 
     private func shouldProcessGestureFrame(_ snapshot: GestureEventSnapshot) -> Bool {
-        guard state.gesturePhase == .idle else { return true }
         let activeTouchCount = Self.activeTouchCount(in: snapshot.touches)
         guard activeTouchCount > 0 else {
-            state.suppressGestureStartUntilAllTouchesLift = false
-            state.consumeTrackpadScrollUntilAllTouchesLift = false
+            state.gestureTouchDownTimestamp = nil
+            if state.gesturePhase == .idle {
+                state.suppressGestureStartUntilAllTouchesLift = false
+                state.consumeTrackpadScrollUntilAllTouchesLift = false
+            }
             return true
         }
+        let touchDown = state.gestureTouchDownTimestamp ?? snapshot.timestamp
+        state.gestureTouchDownTimestamp = touchDown
+        guard state.gesturePhase == .idle else { return true }
         if state.suppressGestureStartUntilAllTouchesLift { return false }
-        guard let config = trackpadGestureConfig else { return false }
-        return TrackpadGestureIntent.allowsGestureStart(config, fingerCount: activeTouchCount)
+        guard let config = trackpadGestureConfig,
+              TrackpadGestureIntent.allowsGestureStart(config, fingerCount: activeTouchCount)
+        else { return false }
+        let sinceTouchDown = snapshot.timestamp - touchDown
+        guard sinceTouchDown <= trackpadGestureArmWindow else {
+            MouseTrace.record(
+                "gesture: \(activeTouchCount) fingers \(Int(sinceTouchDown * 1000))ms after touch-down, "
+                    + "outside arm window; ignoring until lift"
+            )
+            state.suppressGestureStartUntilAllTouchesLift = true
+            return false
+        }
+        return true
     }
 
     private nonisolated static func activeTouchCount(in touches: [GestureTouchSample]) -> Int {
@@ -2385,6 +2406,20 @@ final class MouseEventHandler {
                 finalizeCommittedGestureAfterTouchRelease(timestamp: snapshot.timestamp)
                 return
             }
+        } else if state.gesturePhase == .armed, activeTouchCount > requiredFingers,
+                  snapshot.timestamp - (state.gestureTouchDownTimestamp ?? snapshot.timestamp)
+                  > trackpadGestureArmWindow
+        {
+            // A contact arriving this long after touch-down is a palm settling, not a fourth finger.
+            // Hold the armed count and wait for it to lift rather than converting the gesture.
+            if state.gestureFingerCountMismatchSince == nil {
+                state.gestureFingerCountMismatchSince = snapshot.timestamp
+                MouseTrace.record(
+                    "gesture: \(requiredFingers) -> \(activeTouchCount) fingers outside arm window, "
+                        + "holding \(requiredFingers)"
+                )
+            }
+            return
         } else if state.gesturePhase == .armed, activeTouchCount > requiredFingers,
                   let average = Self.averageGestureTouchPosition(
                       requiredFingers: activeTouchCount,

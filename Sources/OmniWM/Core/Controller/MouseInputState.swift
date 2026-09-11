@@ -97,8 +97,12 @@ struct MouseInputState {
         activeInteractionSource == .trackpadGesture
     }
 
-    /// When the contact frame first disagreed with the locked finger count during a committed window gesture.
+    /// When the contact frame first disagreed with the locked finger count during an armed or committed
+    /// window gesture.
     var gestureFingerCountMismatchSince: TimeInterval?
+    /// When the current touch began (first frame with any contact after an empty one). Gestures may only
+    /// arm within `trackpadGestureArmWindow` of this moment.
+    var gestureTouchDownTimestamp: TimeInterval?
     var viewportGestureSessionID: AnimationDriver.GestureSessionID?
     var workspaceSwipeFired = false
     let workspaceSwipeTracker = SwipeTracker()

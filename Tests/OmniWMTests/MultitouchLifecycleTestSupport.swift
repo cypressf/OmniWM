@@ -152,7 +152,10 @@ final class FakeMultitouchBackend {
     ) {
         guard let registration = callbackByRegistryId[registryId] else { return }
         let stride = 96
-        let fingers = UnsafeMutableRawPointer.allocate(byteCount: max(touches.count, 1) * stride, alignment: 8)
+        let byteCount = max(touches.count, 1) * stride
+        let fingers = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 8)
+        // Zero the record so the size fields the palm filter reads are "unknown", never leftover heap.
+        fingers.initializeMemory(as: UInt8.self, repeating: 0, count: byteCount)
         defer { fingers.deallocate() }
         for (index, touch) in touches.enumerated() {
             let base = index * stride

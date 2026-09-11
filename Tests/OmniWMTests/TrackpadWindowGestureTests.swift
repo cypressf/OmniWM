@@ -580,6 +580,116 @@ final class TrackpadWindowGestureTests: XCTestCase {
         XCTAssertNil(fixture.engine.interactiveResize)
     }
 
+    // MARK: - Arm window (palm rejection)
+
+    func testPalmJoiningTwoFingerScrollDoesNotStartResize() throws {
+        let fixture = try makeNiriFixture(pid: 9_301)
+        let handler = fixture.handler
+        let widthBefore = fixture.firstFrame.width
+
+        // A plain two-finger scroll runs for 300ms. Two fingers are no gesture here.
+        var gesture = fixture.driver(at: fixture.firstRightEdgeGrip)
+        gesture.begin(fingers: 2, x: 0.4)
+        gesture.drag(fingers: 2, fromX: 0.4, toX: 0.55, steps: 30)
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        XCTAssertEqual(handler.state.gestureTouchDownTimestamp, 100)
+
+        // The heel of the palm settles: the frame now carries three contacts, still moving.
+        gesture.drag(fingers: 3, fromX: 0.55, toX: 0.675, steps: 10)
+        XCTAssertEqual(handler.state.gesturePhase, .idle, "a contact joining 300ms into a touch is not a gesture")
+        XCTAssertFalse(handler.state.isResizing)
+        XCTAssertNil(fixture.engine.interactiveResize)
+        XCTAssertEqual(try XCTUnwrap(fixture.frames()[fixture.first.token]).width, widthBefore)
+        XCTAssertTrue(handler.state.suppressGestureStartUntilAllTouchesLift)
+
+        gesture.end()
+        XCTAssertFalse(handler.state.suppressGestureStartUntilAllTouchesLift)
+        XCTAssertNil(handler.state.gestureTouchDownTimestamp)
+
+        // A fresh three-finger touch arms as usual.
+        gesture.time += 0.5
+        gesture.begin(fingers: 3, x: 0.4)
+        XCTAssertEqual(handler.state.gesturePhase, .armed)
+        XCTAssertEqual(handler.state.lockedGestureContext?.fingerCount, 3)
+    }
+
+    func testFingersLandingStaggeredWithinArmWindowStillResize() throws {
+        let fixture = try makeNiriFixture(pid: 9_302)
+        let handler = fixture.handler
+
+        // Real fingers land tens of milliseconds apart: 1, then 2, then 3 contacts.
+        var gesture = fixture.driver(at: fixture.firstRightEdgeGrip)
+        gesture.begin(fingers: 1, x: 0.4)
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        gesture.frame(fingers: 2, x: 0.4, after: 0.03)
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        gesture.frame(fingers: 3, x: 0.4, after: 0.03)
+        XCTAssertEqual(handler.state.gesturePhase, .armed, "60ms after touch-down is inside the arm window")
+        XCTAssertEqual(handler.state.lockedGestureContext?.fingerCount, 3)
+
+        gesture.drag(fingers: 3, fromX: 0.4, toX: 0.45, steps: 4)
+        XCTAssertTrue(handler.state.isResizing)
+        let resize = try XCTUnwrap(fixture.engine.interactiveResize)
+        XCTAssertTrue(resize.edges.contains(.right))
+    }
+
+    func testThirdFingerArrivingAfterArmWindowDoesNotResize() throws {
+        let fixture = try makeNiriFixture(pid: 9_303)
+        let handler = fixture.handler
+
+        var gesture = fixture.driver(at: fixture.firstRightEdgeGrip)
+        gesture.begin(fingers: 2, x: 0.4)
+        gesture.frame(fingers: 3, x: 0.4, after: 0.16)
+        XCTAssertEqual(handler.state.gesturePhase, .idle, "160ms after touch-down is outside the arm window")
+        XCTAssertTrue(handler.state.suppressGestureStartUntilAllTouchesLift)
+    }
+
+    func testLatePalmWhileArmedHoldsThreeFingersInsteadOfConvertingToMove() throws {
+        let fixture = try makeNiriFixture(pid: 9_304)
+        let handler = fixture.handler
+
+        // Three fingers rest on the pad for 300ms without moving: armed, nothing committed.
+        var gesture = fixture.driver(at: fixture.firstRightEdgeGrip)
+        gesture.begin(fingers: 3, x: 0.4)
+        for _ in 0 ..< 3 {
+            gesture.frame(fingers: 3, x: 0.4, after: 0.1)
+        }
+        XCTAssertEqual(handler.state.gesturePhase, .armed)
+        XCTAssertEqual(handler.state.lockedGestureContext?.fingerCount, 3)
+
+        // The palm lands. Before the arm window this would have re-armed as a four-finger move.
+        for _ in 0 ..< 3 {
+            gesture.frame(fingers: 4, x: 0.4)
+        }
+        XCTAssertEqual(handler.state.gesturePhase, .armed)
+        XCTAssertEqual(handler.state.lockedGestureContext?.fingerCount, 3, "a late contact must not change the count")
+        XCTAssertNil(handler.state.activeGestureMode)
+        XCTAssertFalse(handler.state.isMoving)
+
+        // The palm lifts and the fingers move: the resize goes ahead.
+        gesture.drag(fingers: 3, fromX: 0.4, toX: 0.45, steps: 4)
+        XCTAssertTrue(handler.state.isResizing)
+        XCTAssertFalse(handler.state.isMoving)
+        XCTAssertEqual(handler.state.activeGestureMode, .windowResize)
+    }
+
+    func testTouchDownTimestampResetsAfterCommittedGestureEnds() throws {
+        let fixture = try makeNiriFixture(pid: 9_305)
+        let handler = fixture.handler
+
+        var gesture = fixture.driver(at: fixture.firstRightEdgeGrip)
+        gesture.begin(fingers: 3, x: 0.4)
+        gesture.drag(fingers: 3, fromX: 0.4, toX: 0.45, steps: 4)
+        XCTAssertTrue(handler.state.isResizing)
+        gesture.end()
+        XCTAssertNil(handler.state.gestureTouchDownTimestamp)
+
+        // Much later, a new touch must be judged against its own touch-down, not the previous one.
+        gesture.time += 5
+        gesture.begin(fingers: 3, x: 0.4)
+        XCTAssertEqual(handler.state.gesturePhase, .armed)
+    }
+
     // MARK: - Helpers
 
     private func makeController() -> WMController {

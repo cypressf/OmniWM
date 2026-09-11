@@ -12,6 +12,9 @@ private let multitouchTouchStride = 96
 private let multitouchStateByteOffset = 20
 private let multitouchPositionXByteOffset = 32
 private let multitouchPositionYByteOffset = 36
+private let multitouchSizeByteOffset = 48
+private let multitouchMajorAxisByteOffset = 60
+private let multitouchMinorAxisByteOffset = 64
 private let multitouchTouchingState: Int32 = 4
 private let multitouchLiftTimeout = 0.12
 
@@ -281,6 +284,10 @@ final class MultitouchGestureSource {
     struct RawTouch: Sendable {
         let x: Float
         let y: Float
+        /// Contact ellipse axes and total pressure as reported by the sensor; 0 when the frame carries none.
+        var majorAxis: Float = 0
+        var minorAxis: Float = 0
+        var size: Float = 0
     }
 
     struct RawTouchBuffer: RandomAccessCollection, Sendable {
@@ -321,16 +328,38 @@ final class MultitouchGestureSource {
     struct RawFrame: Sendable {
         let touches: RawTouchBuffer
         let timestamp: Double
+        /// Touching contacts the decoder dropped as palms, and the widest major axis among them.
+        let rejectedPalmCount: Int
+        let rejectedPalmMajorAxis: Float
 
-        init(touches: [RawTouch], timestamp: Double) {
+        init(touches: [RawTouch], timestamp: Double, rejectedPalmCount: Int = 0, rejectedPalmMajorAxis: Float = 0) {
             self.touches = RawTouchBuffer(touches)
             self.timestamp = timestamp
+            self.rejectedPalmCount = rejectedPalmCount
+            self.rejectedPalmMajorAxis = rejectedPalmMajorAxis
         }
 
-        init(touches: consuming RawTouchBuffer, timestamp: Double) {
+        init(
+            touches: consuming RawTouchBuffer,
+            timestamp: Double,
+            rejectedPalmCount: Int = 0,
+            rejectedPalmMajorAxis: Float = 0
+        ) {
             self.touches = consume touches
             self.timestamp = timestamp
+            self.rejectedPalmCount = rejectedPalmCount
+            self.rejectedPalmMajorAxis = rejectedPalmMajorAxis
         }
+    }
+
+    /// Contacts whose ellipse major axis exceeds this are palms, not fingertips. Fingertips on Apple
+    /// trackpads report a major axis of roughly 6-12; the heel of a palm or the side of a thumb reports
+    /// 20 and up. Contacts that carry no size data (0) are always accepted. Tune against the
+    /// "multitouch:" lines of the mouse trace, which list every contact's axes whenever the count changes.
+    nonisolated static let palmMajorAxisThreshold: Float = 20
+
+    nonisolated static func isPalm(majorAxis: Float) -> Bool {
+        majorAxis.isFinite && majorAxis > palmMajorAxisThreshold
     }
 
     struct RegistrationToken: Equatable, Sendable {
@@ -543,6 +572,7 @@ final class MultitouchGestureSource {
     private var deviceList: CFArray?
     private var activeGeneration: UInt = 0
     private var previousActiveCount = 0
+    private var previousRejectedPalmCount = 0
     private var topologyTask: Task<Void, Never>?
     private var revalidationTask: Task<Void, Never>?
     private var episodeActive = false
@@ -778,6 +808,7 @@ final class MultitouchGestureSource {
     }
 
     private func emitSnapshot(_ frame: RawFrame, location: CGPoint) {
+        traceContactChanges(frame)
         let result = MultitouchGestureSource.makeSnapshot(
             frame: frame,
             location: location,
@@ -787,6 +818,32 @@ final class MultitouchGestureSource {
         if let snapshot = result.snapshot {
             onSnapshot?(snapshot)
         }
+    }
+
+    /// One mouse-trace line per change in contact or palm count, carrying each contact's ellipse axes
+    /// and pressure so the palm threshold can be tuned from a captured trace.
+    private func traceContactChanges(_ frame: RawFrame) {
+        let activeCount = frame.touches.count
+        guard activeCount != previousActiveCount || frame.rejectedPalmCount != previousRejectedPalmCount else {
+            return
+        }
+        previousRejectedPalmCount = frame.rejectedPalmCount
+        MouseTrace.record(Self.describeContacts(frame))
+    }
+
+    static func describeContacts(_ frame: RawFrame) -> String {
+        let contacts = frame.touches.map { touch in
+            String(format: "%.1fx%.1f z%.2f", touch.majorAxis, touch.minorAxis, touch.size)
+        }.joined(separator: ", ")
+        var line = "multitouch: \(frame.touches.count) contacts [\(contacts)]"
+        if frame.rejectedPalmCount > 0 {
+            line += String(
+                format: ", %d rejected as palm (major %.1f)",
+                frame.rejectedPalmCount,
+                frame.rejectedPalmMajorAxis
+            )
+        }
+        return line
     }
 
     static func makeSnapshot(
@@ -832,6 +889,7 @@ final class MultitouchGestureSource {
     private func cancelRawGesture(_ frame: RawFrame, generation: UInt, location: CGPoint) {
         guard recordAndAccept(frame, generation: generation), previousActiveCount > 0 else { return }
         previousActiveCount = 0
+        previousRejectedPalmCount = 0
         onSnapshot?(Self.liftSnapshot(.cancelled, location: location, timestamp: frame.timestamp))
     }
 
@@ -984,6 +1042,7 @@ final class MultitouchGestureSource {
         if resetGestureState, !registrations.isEmpty || previousActiveCount > 0 {
             onSourceWillReplace?()
             previousActiveCount = 0
+            previousRejectedPalmCount = 0
         }
         let succeeded = cleanup(&registrations)
         guard succeeded else { return false }
@@ -1186,21 +1245,38 @@ final class MultitouchGestureSource {
         rawFrameMailbox.recycle(deliveries)
     }
 
-    private nonisolated static func buildRawFrame(
+    /// Decodes a MultitouchSupport contact frame. Raw frames arrive before Apple's palm rejection, so a
+    /// resting palm shows up as an ordinary touching contact; it is dropped here by contact size.
+    nonisolated static func buildRawFrame(
         fingers: UnsafeMutableRawPointer?,
         count: Int32,
         timestamp: Double
     ) -> RawFrame {
         guard let fingers, count > 0 else { return RawFrame(touches: [], timestamp: timestamp) }
         var touches = RawTouchBuffer()
+        var rejectedPalmCount = 0
+        var rejectedPalmMajorAxis: Float = 0
         for index in 0 ..< Int(count) {
             let base = index * multitouchTouchStride
             let state = fingers.load(fromByteOffset: base + multitouchStateByteOffset, as: Int32.self)
             guard state == multitouchTouchingState else { continue }
+            let majorAxis = fingers.load(fromByteOffset: base + multitouchMajorAxisByteOffset, as: Float.self)
+            if isPalm(majorAxis: majorAxis) {
+                rejectedPalmCount += 1
+                rejectedPalmMajorAxis = max(rejectedPalmMajorAxis, majorAxis)
+                continue
+            }
             let x = fingers.load(fromByteOffset: base + multitouchPositionXByteOffset, as: Float.self)
             let y = fingers.load(fromByteOffset: base + multitouchPositionYByteOffset, as: Float.self)
-            touches.append(RawTouch(x: x, y: y))
+            let minorAxis = fingers.load(fromByteOffset: base + multitouchMinorAxisByteOffset, as: Float.self)
+            let size = fingers.load(fromByteOffset: base + multitouchSizeByteOffset, as: Float.self)
+            touches.append(RawTouch(x: x, y: y, majorAxis: majorAxis, minorAxis: minorAxis, size: size))
         }
-        return RawFrame(touches: touches, timestamp: timestamp)
+        return RawFrame(
+            touches: touches,
+            timestamp: timestamp,
+            rejectedPalmCount: rejectedPalmCount,
+            rejectedPalmMajorAxis: rejectedPalmMajorAxis
+        )
     }
 }
