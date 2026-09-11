@@ -37,6 +37,8 @@ end
 function __omniwmctl_workspace_positionals_at_most
     test (__omniwmctl_workspace_positionals) -le "$argv[1]"
 end
+# omniwmctl never takes file arguments, so never fall back to file completion.
+complete -c omniwmctl -f
 #{{baseLines}}
 #{{queryLines}}
 #{{queryFlagLines}}

@@ -311,6 +311,7 @@ final class NiriInitialContainerPrimarySpanTests: XCTestCase {
     @MainActor
     func testHandlerSeedsAdmissionWidthBeforeFirstConstraintResolutionAndLeavesLiveStateUntouched() throws {
         let controller = makeController()
+        controller.workspaceManager.applyMonitorConfigurationChange([makeMonitor()])
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
         )
@@ -376,6 +377,20 @@ final class NiriInitialContainerPrimarySpanTests: XCTestCase {
             startTime: 0,
             config: .niriWindowMovement,
             displayRefreshRate: 60
+        )
+    }
+
+    /// A fixed synthetic display so the admission width the test asserts on does not depend on the
+    /// host's real main screen: 0.25 of this working width stays well below the 700pt rule minimum.
+    private func makeMonitor() -> Monitor {
+        let frame = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        return Monitor(
+            id: .init(displayId: 52_002),
+            displayId: 52_002,
+            frame: frame,
+            visibleFrame: frame,
+            hasNotch: false,
+            name: "Niri Initial Container Primary Span"
         )
     }
 
