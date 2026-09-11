@@ -48,6 +48,13 @@ swift test     # Default test suite (environment-dependent live tests are opt-in
 make verify    # format-check + lint + build — run this before opening a pull request
 ```
 
+`make run` signs the app with a real certificate when one is available and falls back to ad-hoc signing otherwise.
+Ad-hoc signatures change with every build, so macOS forgets the Accessibility, Screen & System Audio Recording, and
+Automation grants each time you rebuild. To keep them, run `./Scripts/create-dev-signing-identity.sh` once: it creates a
+self-signed "OmniWM Dev" code-signing certificate in your login keychain (macOS asks for your password to trust it),
+which `make run` then picks up automatically. Grant the permissions one more time after the first signed build and they
+persist from then on. To use a different certificate, set `OMNIWM_SIGNING_IDENTITY` to its name.
+
 `make format` and `make lint` pin exact tool versions (SwiftFormat 0.63.0, SwiftLint 0.65.1) and fail on any other
 version, so install those exact versions. SwiftFormat's `fileHeader` rule also enforces the two-line SPDX/GPL-2.0-only
 header that every Swift source and test file under `Sources/` and `Tests/` must start with — never strip or reword

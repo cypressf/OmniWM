@@ -11,6 +11,8 @@ SWIFT_BUILD_ARGS=(-c "$CONFIG" --arch arm64)
 # Signing identity and notarization profile
 SIGNING_IDENTITY="${OMNIWM_SIGNING_IDENTITY:-Developer ID Application: Oliver Nikolic (VF8LDJRGFM)}"
 NOTARIZE_PROFILE="${OMNIWM_NOTARIZE_PROFILE:-OmniWM-Notarize}"
+# Self-signed local identity created by Scripts/create-dev-signing-identity.sh (dev mode only).
+DEV_SIGNING_IDENTITY="OmniWM Dev"
 ENTITLEMENTS="$ROOT_DIR/OmniWM.entitlements"
 
 echo "Running release checks..."
@@ -75,10 +77,22 @@ if [ "$SIGN_AND_NOTARIZE" = "true" ]; then
   rm -f "$ZIP_PATH"
   echo "Done! $APP_DIR is signed and notarized."
 elif [ "$SIGN_AND_NOTARIZE" = "dev" ]; then
-  if security find-identity -v -p codesigning | grep -qF "$SIGNING_IDENTITY"; then
-    IDENTITY="$SIGNING_IDENTITY"
-  else
-    IDENTITY="-"
+  # Prefer a real certificate over ad-hoc signing: TCC (Accessibility, Screen Recording, ...)
+  # keys its grants on the designated requirement, and an ad-hoc requirement is the cdhash of
+  # the exact binary, so every rebuild would have to be re-authorized. Any certificate in the
+  # login keychain gives a requirement that is stable across builds. Create one with
+  # ./Scripts/create-dev-signing-identity.sh
+  IDENTITY="-"
+  for candidate in "$SIGNING_IDENTITY" "$DEV_SIGNING_IDENTITY"; do
+    if security find-identity -v -p codesigning | grep -qF "\"$candidate\""; then
+      IDENTITY="$candidate"
+      break
+    fi
+  done
+  if [ "$IDENTITY" = "-" ]; then
+    echo "warning: no code-signing identity found; signing ad-hoc. macOS will ask for Accessibility and" >&2
+    echo "         Screen Recording permission again after every rebuild. Run" >&2
+    echo "         ./Scripts/create-dev-signing-identity.sh once to create a stable local identity." >&2
   fi
   echo "Signing $APP_DIR for development (identity: $IDENTITY)..."
   codesign --force --sign "$IDENTITY" "$APP_DIR/Contents/MacOS/omniwmctl"
