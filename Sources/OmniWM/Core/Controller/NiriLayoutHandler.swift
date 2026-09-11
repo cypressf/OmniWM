@@ -355,6 +355,35 @@ enum StructuralMutationOutcome: Equatable {
         }
     }
 
+    /// Pushes freshly resolved window constraints into the engine without a relayout, so an interactive
+    /// resize that begins right after a constraint change clamps against the current bounds.
+    func refreshEngineConstraints(workspaceId: WorkspaceDescriptor.ID, monitor: Monitor) {
+        guard let controller,
+              let engine = controller.niriEngine,
+              let activeWorkspaceId = controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id,
+              let refreshInput = controller.layoutRefreshController.buildRefreshInput(
+                  workspaceId: workspaceId,
+                  monitor: monitor,
+                  resolveConstraints: true,
+                  isActiveWorkspace: activeWorkspaceId == workspaceId
+              )
+        else {
+            return
+        }
+
+        let motion = controller.motionPolicy.snapshot()
+        controller.workspaceManager.withEngineMutationScope {
+            for window in refreshInput.windows {
+                engine.updateWindowConstraints(
+                    for: window.token,
+                    constraints: window.constraints,
+                    in: workspaceId,
+                    motion: motion
+                )
+            }
+        }
+    }
+
     func cancelActiveAnimations(for workspaceId: WorkspaceDescriptor.ID) {
         guard let controller else { return }
 

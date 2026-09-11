@@ -48,6 +48,40 @@ final class ObservedMinimumSizeClampTests: XCTestCase {
         XCTAssertEqual(invalidatedWorkspaces, [fixture.workspaceId, fixture.workspaceId])
     }
 
+    func testStableClampIsIgnoredWhileAnInteractiveResizeIsActive() throws {
+        let fixture = try makeFixture()
+        let manager = fixture.controller.workspaceManager
+        let target = CGRect(x: 20, y: 30, width: 400, height: 300)
+        // A character-grid app rounding a resting drag target up by less than one cell.
+        let result = clampResult(fixture, target: target, observed: CGRect(x: 20, y: 30, width: 407, height: 300))
+        fixture.controller.mouseEventHandler.state.isResizing = true
+        let initialSeq = manager.worldSeq
+
+        fixture.controller.adoptObservedMinimumAfterStableSizeClamp(result)
+
+        XCTAssertNil(manager.observedMinSize(for: fixture.token))
+        XCTAssertEqual(manager.worldSeq, initialSeq)
+
+        fixture.controller.mouseEventHandler.state.isResizing = false
+        fixture.controller.adoptObservedMinimumAfterStableSizeClamp(result)
+
+        XCTAssertEqual(manager.observedMinSize(for: fixture.token), CGSize(width: 407, height: 1))
+    }
+
+    func testForgettingObservedMinimumsClearsTiledWindowsInTheWorkspaceOnce() throws {
+        let fixture = try makeFixture()
+        let manager = fixture.controller.workspaceManager
+        XCTAssertFalse(fixture.controller.forgetObservedMinimums(in: fixture.workspaceId))
+        XCTAssertTrue(manager.setObservedMinSize(CGSize(width: 520, height: 1), for: fixture.token))
+        let seqBefore = manager.worldSeq
+
+        XCTAssertTrue(fixture.controller.forgetObservedMinimums(in: fixture.workspaceId))
+
+        XCTAssertNil(manager.observedMinSize(for: fixture.token))
+        XCTAssertNotEqual(manager.worldSeq, seqBefore)
+        XCTAssertFalse(fixture.controller.forgetObservedMinimums(in: fixture.workspaceId))
+    }
+
     func testStableClampRejectsWrongProcessAndReplacedAXIdentity() throws {
         let fixture = try makeFixture()
         let manager = fixture.controller.workspaceManager

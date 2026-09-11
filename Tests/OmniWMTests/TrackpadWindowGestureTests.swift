@@ -166,6 +166,63 @@ final class TrackpadWindowGestureTests: XCTestCase {
         XCTAssertEqual(widthAfter, widthBefore + 160, accuracy: 2)
     }
 
+    func testResizeGestureForgetsLearnedMinimumsSoTheWindowCanShrinkAgain() throws {
+        let fixture = try makeNiriFixture(pid: 9_106)
+        let handler = fixture.handler
+        let manager = fixture.controller.workspaceManager
+        let widthBefore = fixture.firstFrame.width
+        for window in [fixture.first, fixture.second] {
+            manager.setCachedConstraints(.unconstrained, for: window.token)
+        }
+        // An earlier drag settled on a size a character-grid app rounded up, and that size was learned as
+        // the window's minimum, both in the model and in the engine's node.
+        let learnedMin = WindowSizeConstraints(
+            minSize: CGSize(width: widthBefore, height: 1),
+            maxSize: WindowSizeConstraints.unconstrained.maxSize,
+            isFixed: false
+        )
+        XCTAssertTrue(manager.setObservedMinSize(learnedMin.minSize, for: fixture.first.token))
+        manager.withEngineMutationScope {
+            fixture.engine.updateWindowConstraints(
+                for: fixture.first.token,
+                constraints: learnedMin,
+                in: fixture.workspaceId,
+                motion: .enabled
+            )
+        }
+        XCTAssertEqual(fixture.first.constraints.minSize.width, widthBefore)
+
+        // Grab the right edge and drag left.
+        let start = CGPoint(x: fixture.firstFrame.maxX - 20, y: fixture.firstFrame.midY)
+        var time: TimeInterval = 100
+        sendFrame(handler, phase: .began, fingers: 3, x: 0.6, y: 0.5, at: time, location: start)
+        for step in 1 ... 8 {
+            time += 0.01
+            sendFrame(
+                handler,
+                phase: .changed,
+                fingers: 3,
+                x: 0.6 - 0.0125 * CGFloat(step),
+                y: 0.5,
+                at: time,
+                location: start
+            )
+        }
+
+        XCTAssertTrue(handler.state.isResizing)
+        XCTAssertNil(manager.observedMinSize(for: fixture.first.token))
+        XCTAssertEqual(
+            fixture.first.constraints.minSize.width,
+            WindowSizeConstraints.unconstrained.minSize.width
+        )
+
+        time += 0.01
+        sendFrame(handler, phase: .ended, fingers: 0, x: 0, y: 0, at: time, location: start)
+
+        let widthAfter = try XCTUnwrap(fixture.frames()[fixture.first.token]).width
+        XCTAssertEqual(widthAfter, widthBefore - 160, accuracy: 2)
+    }
+
     func testSensitivityScalesVirtualCursorTravel() throws {
         let fixture = try makeNiriFixture(pid: 9_103)
         fixture.controller.settings.windowGestureSensitivity = 0.5
@@ -623,6 +680,46 @@ final class TrackpadWindowGestureTests: XCTestCase {
         fixture.relayout()
         let widthAfter = try XCTUnwrap(fixture.presentedFrame(fixture.first)).width
         XCTAssertGreaterThan(widthAfter, fixture.firstFrame.width + 100)
+    }
+
+    func testDwindleResizeGestureForgetsLearnedMinimumsSoTheSplitCanShrinkAgain() throws {
+        let fixture = try makeDwindleFixture(pid: 9_206)
+        let handler = fixture.handler
+        let manager = fixture.controller.workspaceManager
+        for token in [fixture.first, fixture.second] {
+            manager.setCachedConstraints(.unconstrained, for: token)
+        }
+        XCTAssertTrue(
+            manager.setObservedMinSize(CGSize(width: fixture.firstFrame.width, height: 1), for: fixture.first)
+        )
+
+        // Grab the right edge and drag left.
+        let start = CGPoint(x: fixture.firstFrame.maxX - 20, y: fixture.firstFrame.midY)
+        var time: TimeInterval = 100
+        sendFrame(handler, phase: .began, fingers: 3, x: 0.6, y: 0.5, at: time, location: start)
+        for step in 1 ... 8 {
+            time += 0.01
+            sendFrame(
+                handler,
+                phase: .changed,
+                fingers: 3,
+                x: 0.6 - 0.0125 * CGFloat(step),
+                y: 0.5,
+                at: time,
+                location: start
+            )
+        }
+        XCTAssertTrue(handler.state.isResizing)
+        XCTAssertEqual(handler.state.resizeLayout, .dwindle)
+        XCTAssertNil(manager.observedMinSize(for: fixture.first))
+
+        time += 0.01
+        sendFrame(handler, phase: .ended, fingers: 0, x: 0, y: 0, at: time, location: start)
+
+        XCTAssertFalse(handler.state.isResizing)
+        fixture.relayout()
+        let widthAfter = try XCTUnwrap(fixture.presentedFrame(fixture.first)).width
+        XCTAssertLessThan(widthAfter, fixture.firstFrame.width - 100)
     }
 
     func testDwindleResizeGestureFallsBackToTheEdgeThatCanMove() throws {

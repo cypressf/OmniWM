@@ -1527,7 +1527,12 @@ final class WMController {
     }
 
     func adoptObservedMinimumAfterStableSizeClamp(_ result: AXFrameApplyResult) {
-        guard let entry = workspaceManager.entry(forPid: result.pid, windowId: result.windowId),
+        // While the user drags a size, apps that snap to increments (Terminal's character grid) round
+        // every resting target up or down by less than a cell; treating a round-up as the window's
+        // minimum would stop the drag from ever shrinking it again. The frame the drag settles on is
+        // the one worth learning from.
+        guard !mouseEventHandler.isInteractiveResizeActive,
+              let entry = workspaceManager.entry(forPid: result.pid, windowId: result.windowId),
               sameAXWindowIdentity(entry.axRef, result.expectedWindow),
               entry.mode == .tiling,
               entry.layoutReason == .standard,
@@ -1575,6 +1580,23 @@ final class WMController {
         )
         guard observedMin.width > 1 || observedMin.height > 1 else { return }
         adoptObservedMinimum(observedMin, for: entry)
+    }
+
+    /// An interactive resize re-tests every learned minimum in the workspace so the drag can push
+    /// windows below sizes that were only ever increment rounding. Apps that truly refuse to shrink
+    /// re-teach their minimum from the frame the resize settles on.
+    @discardableResult
+    func forgetObservedMinimums(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        var forgot = false
+        for entry in workspaceManager.entries(in: workspaceId) where entry.mode == .tiling {
+            if workspaceManager.clearObservedMinSize(for: entry.token) {
+                forgot = true
+            }
+        }
+        if forgot {
+            workspaceManager.invalidateLayout(for: [workspaceId])
+        }
+        return forgot
     }
 
     private func adoptObservedMinimum(_ observedMin: CGSize, for entry: WindowState) {

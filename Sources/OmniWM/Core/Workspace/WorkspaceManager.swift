@@ -2632,6 +2632,11 @@ final class WorkspaceManager {
     }
 
     @discardableResult
+    func clearObservedMinSize(for token: WindowToken) -> Bool {
+        world.clearObservedMinSize(for: token)
+    }
+
+    @discardableResult
     func moveWorkspaceToMonitor(
         _ workspaceId: WorkspaceDescriptor.ID,
         to targetMonitorId: Monitor.ID,
