@@ -567,6 +567,11 @@ final class MouseEventHandler {
         state.isMoving || state.isResizing || isViewportGestureActive
     }
 
+    /// A mouse- or gesture-driven window resize is in progress.
+    var isInteractiveResizeActive: Bool {
+        state.isResizing
+    }
+
     var isViewportGestureActive: Bool {
         switch state.gesturePhase {
         case .idle:
@@ -1213,6 +1218,9 @@ final class MouseEventHandler {
             workspaceId: wsId,
             monitor: monitor
         )
+        if controller.forgetObservedMinimums(in: wsId) {
+            controller.niriLayoutHandler.refreshEngineConstraints(workspaceId: wsId, monitor: monitor)
+        }
         guard engine.interactiveResizeBegin(
             windowId: tiledWindow.id,
             edges: edges,
@@ -1310,6 +1318,7 @@ final class MouseEventHandler {
               let frame = node.presentedFrame(at: controller.animationClock.now())
         else { return false }
 
+        controller.forgetObservedMinimums(in: wsId)
         controller.dwindleLayoutHandler.refreshEngineConstraints(workspaceId: wsId, monitor: monitor)
         let innerGap = controller.resolvedDwindleSettings(for: monitor).innerGap
         guard engine.interactiveResizeBegin(

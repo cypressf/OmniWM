@@ -579,4 +579,9 @@ final class WindowModel {
         observedMinSizeByToken[token] = size
         return true
     }
+
+    @discardableResult
+    func clearObservedMinSize(for token: WindowToken) -> Bool {
+        observedMinSizeByToken.removeValue(forKey: token) != nil
+    }
 }
