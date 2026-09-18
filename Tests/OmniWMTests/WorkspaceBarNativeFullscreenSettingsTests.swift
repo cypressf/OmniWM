@@ -11,25 +11,25 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
     private static let externalUUID = "22222222-2222-4222-8222-222222222222"
 
     func testDefaultsRoundTrip() throws {
-        XCTAssertFalse(SettingsExport.defaults().workspaceBarHideInNativeFullscreen)
+        XCTAssertFalse(SettingsExport.defaults().workspaceBar.hideInNativeFullscreen)
 
         let data = try SettingsTOMLCodec.encode(.defaults())
         let toml = String(decoding: data, as: UTF8.self)
         XCTAssertTrue(toml.contains("hideInNativeFullscreen = false"))
 
         let decoded = try SettingsTOMLCodec.decode(data)
-        XCTAssertFalse(decoded.workspaceBarHideInNativeFullscreen)
+        XCTAssertFalse(decoded.workspaceBar.hideInNativeFullscreen)
     }
 
     func testNonDefaultRoundTrip() throws {
         var export = SettingsExport.defaults()
-        export.workspaceBarHideInNativeFullscreen = true
+        export.workspaceBar.hideInNativeFullscreen = true
 
         let data = try SettingsTOMLCodec.encode(export)
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("hideInNativeFullscreen = true"))
 
         let decoded = try SettingsTOMLCodec.decode(data)
-        XCTAssertTrue(decoded.workspaceBarHideInNativeFullscreen)
+        XCTAssertTrue(decoded.workspaceBar.hideInNativeFullscreen)
     }
 
     func testMissingKeyRejectsDecode() throws {
@@ -51,7 +51,7 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
     @MainActor
     func testBarHidesOnlyOnTheDisplayShowingNativeFullscreen() {
         let settings = makeSettingsStore()
-        settings.workspaceBarEnabled = true
+        settings.workspaceBar.enabled = true
         let controller = WMController(settings: settings)
         let builtIn = makeMonitor(displayId: 71_001, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
         let external = makeMonitor(displayId: 71_002, uuid: Self.externalUUID, name: "External", originX: 1_440)
@@ -61,7 +61,7 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
 
-        settings.workspaceBarHideInNativeFullscreen = true
+        settings.workspaceBar.hideInNativeFullscreen = true
         XCTAssertFalse(controller.isWorkspaceBarVisible(on: builtIn))
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
 
@@ -71,12 +71,38 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testFillModeHidesOnlyTheFullscreenDisplayWithGlobalHideDisabled() {
+        let settings = makeSettingsStore()
+        settings.workspaceBar.enabled = true
+        settings.workspaceBar.notchMode = .fillLeftOfNotch
+        XCTAssertFalse(settings.workspaceBar.hideInNativeFullscreen)
+        let controller = WMController(settings: settings)
+        let builtIn = makeMonitor(displayId: 71_006, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
+        let external = makeMonitor(displayId: 71_007, uuid: Self.externalUUID, name: "External", originX: 1_440)
+        controller.workspaceManager.applyMonitorConfigurationChange([builtIn, external])
+
+        commitTopology(on: controller, fullscreenDisplayUUID: Self.builtInUUID)
+        XCTAssertFalse(controller.isWorkspaceBarVisible(on: builtIn))
+        XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
+
+        settings.workspaceBar.monitorOverrides = [
+            MonitorBarSettings(monitorName: builtIn.name, monitorDisplayUUID: Self.builtInUUID, notchMode: .off)
+        ]
+        XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
+
+        settings.workspaceBar.monitorOverrides = []
+        commitTopology(on: controller, fullscreenDisplayUUID: nil)
+        XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
+        XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
+    }
+
+    @MainActor
     func testAutoHideDoesNotReleaseReservedLayoutSpace() {
         let settings = makeSettingsStore()
-        settings.workspaceBarEnabled = true
-        settings.workspaceBarReserveLayoutSpace = true
-        settings.workspaceBarHeight = 24
-        settings.workspaceBarHideInNativeFullscreen = true
+        settings.workspaceBar.enabled = true
+        settings.workspaceBar.reserveLayoutSpace = true
+        settings.workspaceBar.height = 24
+        settings.workspaceBar.hideInNativeFullscreen = true
         let controller = WMController(settings: settings)
         let builtIn = makeMonitor(displayId: 71_003, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
         controller.workspaceManager.applyMonitorConfigurationChange([builtIn])
@@ -96,8 +122,8 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
     @MainActor
     func testUnknownTopologyKeepsTheBarVisible() {
         let settings = makeSettingsStore()
-        settings.workspaceBarEnabled = true
-        settings.workspaceBarHideInNativeFullscreen = true
+        settings.workspaceBar.enabled = true
+        settings.workspaceBar.hideInNativeFullscreen = true
         let controller = WMController(settings: settings)
         let builtIn = makeMonitor(displayId: 71_004, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
         controller.workspaceManager.applyMonitorConfigurationChange([builtIn])
@@ -110,8 +136,8 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
     func testRawSkyLightDisplayIdentifiersStillHideTheBar() {
         for rawIdentifier in ["Main", "71005"] {
             let settings = makeSettingsStore()
-            settings.workspaceBarEnabled = true
-            settings.workspaceBarHideInNativeFullscreen = true
+            settings.workspaceBar.enabled = true
+            settings.workspaceBar.hideInNativeFullscreen = true
             let controller = WMController(settings: settings)
             let builtIn = makeMonitor(displayId: 71_005, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
             controller.workspaceManager.applyMonitorConfigurationChange([builtIn])

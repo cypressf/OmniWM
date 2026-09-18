@@ -5,42 +5,32 @@ import CoreGraphics
 import Foundation
 
 struct DwindleInteractiveResize {
+    struct Axis {
+        let orientation: DwindleOrientation
+        let splitId: DwindleNodeId
+        let childId: DwindleNodeId
+        let originRatio: CGFloat?
+        let length: CGFloat
+    }
+
     let token: WindowToken
     let workspaceId: WorkspaceDescriptor.ID
     let edges: ResizeEdge
     let startMouseLocation: CGPoint
     let innerGap: CGFloat
 
-    let horizontalSplitId: DwindleNodeId?
-    let horizontalChildId: DwindleNodeId?
-    let horizontalOriginRatio: CGFloat?
-    let horizontalAxisLength: CGFloat?
-
-    let verticalSplitId: DwindleNodeId?
-    let verticalChildId: DwindleNodeId?
-    let verticalOriginRatio: CGFloat?
-    let verticalAxisLength: CGFloat?
+    let horizontal: Axis?
+    let vertical: Axis?
 
     var didChange = false
 }
 
-/// Which edge a resize grabs when the requested one has no split to move.
 enum DwindleResizeEdgePolicy {
-    /// Move exactly the requested edges; an edge without a controlling split contributes nothing.
     case exact
-    /// Per axis, fall back to the opposite edge when only that one has a split. For input with no physical
-    /// grab point, such as a trackpad gesture, this keeps a tile against the screen edge resizable.
     case nearestMovable
 }
 
 extension DwindleLayoutEngine {
-    private struct ControllingSplitMatch {
-        let split: DwindleNode
-        let child: DwindleNode
-        let axisLength: CGFloat
-        let edge: ResizeEdge
-    }
-
     func interactiveResizeBegin(
         token: WindowToken,
         edges: ResizeEdge,
@@ -71,17 +61,11 @@ extension DwindleLayoutEngine {
         interactiveResize = DwindleInteractiveResize(
             token: token,
             workspaceId: workspaceId,
-            edges: [horizontal?.edge ?? [], vertical?.edge ?? []],
+            edges: edgePolicy == .exact ? edges : [horizontal?.edge ?? [], vertical?.edge ?? []],
             startMouseLocation: startLocation,
             innerGap: innerGap,
-            horizontalSplitId: horizontal?.split.id,
-            horizontalChildId: horizontal?.child.id,
-            horizontalOriginRatio: horizontal?.split.splitRatio,
-            horizontalAxisLength: horizontal?.axisLength,
-            verticalSplitId: vertical?.split.id,
-            verticalChildId: vertical?.child.id,
-            verticalOriginRatio: vertical?.split.splitRatio,
-            verticalAxisLength: vertical?.axisLength
+            horizontal: horizontal?.axis,
+            vertical: vertical?.axis
         )
         return true
     }
@@ -97,12 +81,7 @@ extension DwindleLayoutEngine {
         if applyAxis(
             resize: resize,
             leaf: leaf,
-            axis: .horizontal,
-            wantFirstChild: resize.edges.contains(.right),
-            splitId: resize.horizontalSplitId,
-            childId: resize.horizontalChildId,
-            originRatio: resize.horizontalOriginRatio,
-            axisLength: resize.horizontalAxisLength,
+            axis: resize.horizontal,
             delta: currentLocation.x - resize.startMouseLocation.x
         ) {
             changed = true
@@ -110,12 +89,7 @@ extension DwindleLayoutEngine {
         if applyAxis(
             resize: resize,
             leaf: leaf,
-            axis: .vertical,
-            wantFirstChild: resize.edges.contains(.top),
-            splitId: resize.verticalSplitId,
-            childId: resize.verticalChildId,
-            originRatio: resize.verticalOriginRatio,
-            axisLength: resize.verticalAxisLength,
+            axis: resize.vertical,
             delta: currentLocation.y - resize.startMouseLocation.y
         ) {
             changed = true
@@ -153,35 +127,30 @@ extension DwindleLayoutEngine {
     private func applyAxis(
         resize: DwindleInteractiveResize,
         leaf: DwindleNode,
-        axis: DwindleOrientation,
-        wantFirstChild: Bool,
-        splitId: DwindleNodeId?,
-        childId: DwindleNodeId?,
-        originRatio: CGFloat?,
-        axisLength: CGFloat?,
+        axis: DwindleInteractiveResize.Axis?,
         delta: CGFloat
     ) -> Bool {
-        guard let splitId, let childId, let originRatio, let axisLength,
+        guard let axis, let originRatio = axis.originRatio,
               let match = controllingSplit(
                   from: leaf,
-                  orientation: axis,
-                  wantFirstChild: wantFirstChild,
+                  orientation: axis.orientation,
+                  wantFirstChild: resize.edges.contains(axis.orientation == .horizontal ? .right : .top),
                   workspaceId: resize.workspaceId
               ),
-              match.split.id == splitId,
-              match.child.id == childId
+              match.split.id == axis.splitId,
+              match.child.id == axis.childId
         else {
             return false
         }
 
         let newRatio = clampedRatioRespectingMinimums(
-            originRatio + 2 * delta / axisLength,
+            originRatio + 2 * delta / axis.length,
             for: match.split,
             innerGap: resize.innerGap,
             excludedTokens: excludedTokens(in: resize.workspaceId)
         )
         guard newRatio != match.split.splitRatio else { return false }
-        match.split.kind = .split(orientation: axis, ratio: newRatio)
+        match.split.kind = .split(orientation: axis.orientation, ratio: newRatio)
         return true
     }
 
@@ -191,35 +160,63 @@ extension DwindleLayoutEngine {
         axis: DwindleOrientation,
         policy: DwindleResizeEdgePolicy,
         workspaceId: WorkspaceDescriptor.ID
-    ) -> ControllingSplitMatch? {
-        // The first child of a split sits on the left or top, so grabbing a tile's right or top edge moves
-        // the split where this tile is the first child.
-        let (firstChildEdge, secondChildEdge): (ResizeEdge, ResizeEdge) = switch axis {
+    ) -> (axis: DwindleInteractiveResize.Axis, edge: ResizeEdge)? {
+        let (firstEdge, secondEdge): (ResizeEdge, ResizeEdge) = switch axis {
         case .horizontal: (.right, .left)
         case .vertical: (.top, .bottom)
         }
-        let requested = edges.intersection([firstChildEdge, secondChildEdge])
-        guard let preferred = [firstChildEdge, secondChildEdge].first(where: { requested.contains($0) }) else {
+        let preferred: ResizeEdge
+        if edges.contains(firstEdge) {
+            preferred = firstEdge
+        } else if edges.contains(secondEdge) {
+            preferred = secondEdge
+        } else {
             return nil
         }
-        let candidates: [ResizeEdge] = switch policy {
-        case .exact: [preferred]
-        case .nearestMovable: [preferred, preferred == firstChildEdge ? secondChildEdge : firstChildEdge]
+        if let resolved = resolveAxis(
+            from: leaf,
+            axis: axis,
+            wantFirstChild: preferred == firstEdge,
+            workspaceId: workspaceId
+        ) {
+            return (resolved, preferred)
         }
-        for edge in candidates {
-            guard let match = controllingSplit(
-                from: leaf,
-                orientation: axis,
-                wantFirstChild: edge == firstChildEdge,
-                workspaceId: workspaceId
-            ),
-                let frame = match.split.cachedFrame
-            else { continue }
-            let axisLength = axis == .horizontal ? frame.width : frame.height
-            guard axisLength.isFinite, axisLength > 0 else { continue }
-            return ControllingSplitMatch(split: match.split, child: match.child, axisLength: axisLength, edge: edge)
+        guard policy == .nearestMovable,
+              let resolved = resolveAxis(
+                  from: leaf,
+                  axis: axis,
+                  wantFirstChild: preferred != firstEdge,
+                  workspaceId: workspaceId
+              )
+        else { return nil }
+        return (resolved, preferred == firstEdge ? secondEdge : firstEdge)
+    }
+
+    private func resolveAxis(
+        from leaf: DwindleNode,
+        axis: DwindleOrientation,
+        wantFirstChild: Bool,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> DwindleInteractiveResize.Axis? {
+        guard let match = controllingSplit(
+            from: leaf,
+            orientation: axis,
+            wantFirstChild: wantFirstChild,
+            workspaceId: workspaceId
+        ),
+            let frame = match.split.cachedFrame
+        else {
+            return nil
         }
-        return nil
+        let axisLength = axis == .horizontal ? frame.width : frame.height
+        guard axisLength.isFinite, axisLength > 0 else { return nil }
+        return DwindleInteractiveResize.Axis(
+            orientation: axis,
+            splitId: match.split.id,
+            childId: match.child.id,
+            originRatio: match.split.splitRatio,
+            length: axisLength
+        )
     }
 
     private func controllingSplit(

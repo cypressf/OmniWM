@@ -15,7 +15,7 @@ Use [App Rules](/features/app-rules/) to exclude problematic apps from tiling or
 
 ## Swap windows by dragging
 
-Hold the configured mouse-move modifier and drag a tiled window onto another to swap them; this works in both layouts. On Niri, add `Shift` to insert into a column instead. In Dwindle the drag swaps whole tiles, so a tab group moves with all of its members, the drop target is outlined while you hover it, releasing anywhere else changes nothing, and `Shift` has no effect. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In [Overview](/features/overview/), `Option + drag` targets a workspace, window position, or Niri column gap.
+Hold the configured mouse-move modifier and drag a tiled window onto another to swap them; this works in both layouts. On Niri, add `Shift` to insert into a column instead. In Dwindle the drag swaps whole tiles, so a tab group moves with all of its members, the drop target is outlined while you hover it, releasing anywhere else changes nothing, and `Shift` has no effect. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In [Overview](/features/overview/), dragging a thumbnail needs no modifier and targets a workspace, window position, or Niri column gap.
 
 ## Resize with a right-drag
 
@@ -29,29 +29,25 @@ Hold `Option + Shift + Mouse Scroll Wheel` (default, configurable) to scroll alo
 
 Use 2/3/4-finger gestures (configurable) along the active Niri primary axis; direction can be inverted (local hardware validation is limited).
 
-The **Trackpad Scroll Style** picker in **Settings → Mouse & Trackpad** chooses how the strip responds:
+The **Trackpad scroll style** picker under **Settings → Mouse & Trackpad → Trackpad Gestures → Scroll columns** chooses how the strip responds:
 
 - **Snap to Columns** (default) — the scroll snaps to the nearest column.
 - **Momentum** — free inertial scrolling with rubber-band edges.
 
+All five gesture assignments appear together in **Trackpad Gestures**. You can select fingers while a gesture is off. If an assignment conflicts, **Set Up…** shows exactly which gestures would turn off and lets you choose before applying. Turning off **Scroll columns** also turns off modifier + mouse-wheel column scrolling.
+
+## Move and resize with the trackpad (opt-in)
+
+Enable **Move windows** or **Resize windows** in **Settings → Mouse & Trackpad → Trackpad Gestures** to drag without clicking. The gesture targets the tiled window under the cursor in either layout; lift all fingers to finish. Move swaps with the window under the drop position and stays on the starting monitor. Resize adjusts the nearest movable edges. The pointer itself stays in place.
+
+Choose two, three, or four fingers for each action. Defaults are four fingers to move and three to resize, with both actions disabled. A window gesture needs a finger count unused by other enabled OmniWM gestures, including column scrolling, workspace switching, and Overview. **Set Up…** previews which conflicting gestures would turn off and lets you choose before applying the assignment. You can also reassign or disable those gestures yourself. At **1.0x** sensitivity, a full trackpad sweep travels across the starting screen.
+
+Turn off matching macOS gestures in **System Settings → Trackpad → More Gestures** to prevent Mission Control, App Exposé, or full-screen app switching from firing alongside window gestures.
+
 ## Workspace swipe (opt-in)
 
-Opt in under **Settings → Mouse & Trackpad**: swipe with a configurable finger count (2/3/4) and axis (horizontal/vertical) to switch to the next/previous workspace on the monitor under the cursor, one switch per swipe. Sharing the column-scroll finger count locks the axis to vertical.
+Opt in under **Settings → Mouse & Trackpad**: swipe with a configurable finger count (2/3/4) and axis (horizontal/vertical) to switch to the next/previous workspace on the monitor under the cursor, one switch per swipe. When sharing fingers with enabled column scrolling in Niri, workspace swipes use the perpendicular axis on each display: vertical for horizontal Niri containers, horizontal for vertical containers. Otherwise, they use the selected axis.
 
 :::caution[Mission Control can intercept vertical swipes]
 For vertical swipes with three or four fingers, first turn off Mission Control in System Settings → Trackpad → More Gestures so macOS does not intercept the gesture.
-:::
-
-## Window move and resize gestures (opt-in)
-
-Opt in under **Settings → Mouse & Trackpad → Trackpad Window Move & Resize** to move or resize tiled windows by dragging several fingers across the trackpad without clicking, the way Hyprland's touchpad gestures work. The defaults are four fingers to move and three fingers to resize, each with its own toggle and finger count.
-
-- **Move**: the window under the cursor follows a virtual cursor that starts where the real cursor sits; the drag ghost and drop target behave exactly like a modifier + left drag. Lift your fingers to drop. On Niri this swaps with the target window; on Dwindle it swaps tiles.
-- **Resize**: pulls the corner of the window under the cursor that is nearest the cursor, exactly like a modifier + right drag. Lift your fingers to finish.
-- **Sensitivity**: at 1.0x a full sweep of the trackpad carries the window across the whole monitor. Raise it for large displays, lower it for precision.
-
-A window gesture owns its finger count outright: column scrolling or workspace swipe configured for the same count stop firing while that window gesture is enabled, and when move and resize share a count, move wins. Settings shows a caption whenever one of these collisions exists.
-
-:::caution[macOS still sees the fingers]
-OmniWM observes the trackpad but cannot swallow the touches. Turn off Mission Control, App Exposé, and Swipe between full-screen applications for the finger count you pick in System Settings → Trackpad → More Gestures, or the system gesture fires alongside the window gesture.
 :::

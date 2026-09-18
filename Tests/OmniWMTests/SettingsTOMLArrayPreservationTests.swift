@@ -87,7 +87,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
     func testDeletedUUIDMonitorDoesNotTransferExtensionToWeakerNameIdentity() throws {
         let displayUUID = "12345678-90AB-CDEF-1234-567890ABCDEF"
         var original = SettingsExport.defaults()
-        original.monitorArrangements = [MonitorArrangement(id: firstRuleID, monitors: [MonitorRoutingSettings(
+        original.routing.arrangements = [MonitorArrangement(id: firstRuleID, monitors: [MonitorRoutingSettings(
             monitorName: "Shared Name",
             monitorDisplayUUID: displayUUID,
             gridColumn: 0,
@@ -99,7 +99,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
             to: SettingsTOMLCodec.encode(original)
         )
         var changed = original
-        changed.monitorArrangements[0].monitors = [MonitorRoutingSettings(
+        changed.routing.arrangements[0].monitors = [MonitorRoutingSettings(
             monitorName: "Shared Name",
             gridColumn: 1,
             gridRow: 0
@@ -134,7 +134,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
 
     func testEmptyMonitorNamePreservesExtensionByUniqueKnownContent() throws {
         var original = SettingsExport.defaults()
-        original.monitorArrangements = [MonitorArrangement(id: firstRuleID, monitors: [MonitorRoutingSettings(
+        original.routing.arrangements = [MonitorArrangement(id: firstRuleID, monitors: [MonitorRoutingSettings(
             monitorName: "",
             gridColumn: 0,
             gridRow: 0
@@ -145,7 +145,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
             to: SettingsTOMLCodec.encode(original)
         )
         var changed = original
-        changed.gapSize += 1
+        changed.gaps.size += 1
 
         let encoded = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: previous)
         let section = try section("routing.arrangements.monitors", containing: "monitorName = \"\"", in: encoded)
@@ -153,7 +153,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
         XCTAssertTrue(section.contains(#"extensionMarker = "empty-name""#))
 
         var unsafe = original
-        unsafe.monitorArrangements[0].monitors[0].gridColumn = 1
+        unsafe.routing.arrangements[0].monitors[0].gridColumn = 1
         XCTAssertThrowsError(try SettingsTOMLCodec.encode(unsafe, preservingUnknownKeysFrom: previous)) { error in
             XCTAssertEqual(
                 error as? SettingsTOMLCodecError,
@@ -164,7 +164,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
 
     func testArrangementExtensionsFollowIDsThroughEditsReorderResetAndDeletion() throws {
         var original = SettingsExport.defaults()
-        original.monitorArrangements = [
+        original.routing.arrangements = [
             MonitorArrangement(id: firstRuleID, monitors: [
                 MonitorRoutingSettings(monitorName: "First", monitorDisplayId: 1, gridColumn: 0, gridRow: 0)
             ]),
@@ -183,8 +183,8 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
             to: previous
         )
         var changed = original
-        changed.monitorArrangements[0].monitors[0].gridColumn = 3
-        changed.monitorArrangements.reverse()
+        changed.routing.arrangements[0].monitors[0].gridColumn = 3
+        changed.routing.arrangements.reverse()
 
         let edited = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: previous)
         let first = try section("routing.arrangements", containing: firstRuleID.uuidString, in: edited)
@@ -192,13 +192,13 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
         XCTAssertTrue(first.contains("gridColumn = 3"))
         XCTAssertFalse(first.contains(#"extensionMarker = "second-arrangement""#))
 
-        changed.monitorArrangements[1].monitors = original.monitorArrangements[0].monitors
+        changed.routing.arrangements[1].monitors = original.routing.arrangements[0].monitors
         let reset = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: edited)
         let resetSection = try section("routing.arrangements", containing: firstRuleID.uuidString, in: reset)
         XCTAssertTrue(resetSection.contains(#"extensionMarker = "first-arrangement""#))
         XCTAssertTrue(resetSection.contains("gridColumn = 0"))
 
-        changed.monitorArrangements.removeLast()
+        changed.routing.arrangements.removeLast()
         let deleted = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: reset)
         let text = try utf8String(deleted)
         XCTAssertFalse(text.contains(firstRuleID.uuidString))
@@ -222,7 +222,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
         try ambiguous.write(to: settingsURL)
         let persistence = SettingsFilePersistence(directory: directory, startWatching: false, deferSaves: false)
         var loaded = try XCTUnwrap(persistence.loadOutcome().export)
-        loaded.gapSize += 1
+        loaded.gaps.size += 1
 
         XCTAssertThrowsError(try persistence.saveImmediately(loaded)) { error in
             XCTAssertEqual(
@@ -312,7 +312,7 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
             ),
             MonitorRoutingSettings(monitorName: "Name Monitor", gridColumn: 2, gridRow: 0)
         ]
-        export.monitorArrangements = [MonitorArrangement(id: firstRuleID, monitors: rows)]
+        export.routing.arrangements = [MonitorArrangement(id: firstRuleID, monitors: rows)]
         export.monitorOrientationSettings = [MonitorOrientationSettings(
             monitorName: "Portrait",
             orientation: updated ? .horizontal : .vertical
@@ -332,5 +332,121 @@ final class SettingsTOMLArrayPreservationTests: XCTestCase {
 
     private func utf8String(_ data: Data) throws -> String {
         try XCTUnwrap(String(data: data, encoding: .utf8))
+    }
+}
+
+extension SettingsTOMLArrayPreservationTests {
+    func testRankingExtensionsFollowIdentitiesThroughReorderAndUUIDRename() throws {
+        let displayUUID = firstRuleID.uuidString
+        var original = SettingsExport.defaults()
+        original.monitorRanking = [
+            OutputId(displayUUID: displayUUID, name: "UUID Monitor"),
+            OutputId(displayId: 1, name: "Shared Monitor"),
+            OutputId(displayId: 2, name: "Shared Monitor"),
+            OutputId(name: "Name Monitor")
+        ]
+        var previous = try SettingsTOMLCodec.encode(original)
+        previous = try addingMarker("uuid", after: "displayUUID = \"\(displayUUID)\"", to: previous)
+        previous = try addingMarker("first-id", after: "displayId = 1", to: previous)
+        previous = try addingMarker("second-id", after: "displayId = 2", to: previous)
+        previous = try addingMarker("name", after: #"name = "Name Monitor""#, to: previous)
+        var changed = original
+        changed.monitorRanking = [
+            original.monitorRanking[2],
+            OutputId(displayUUID: displayUUID, name: "Renamed Monitor"),
+            OutputId(name: "name monitor"),
+            OutputId(displayId: 1, name: "shared monitor")
+        ]
+
+        let encoded = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: previous)
+        let uuidSection = try section("monitors.ranking", containing: displayUUID, in: encoded)
+        let firstIDSection = try section("monitors.ranking", containing: "displayId = 1", in: encoded)
+        let secondIDSection = try section("monitors.ranking", containing: "displayId = 2", in: encoded)
+        let nameSection = try section("monitors.ranking", containing: #"name = "name monitor""#, in: encoded)
+
+        XCTAssertTrue(uuidSection.contains(#"extensionMarker = "uuid""#))
+        XCTAssertTrue(uuidSection.contains(#"name = "Renamed Monitor""#))
+        XCTAssertTrue(firstIDSection.contains(#"extensionMarker = "first-id""#))
+        XCTAssertFalse(firstIDSection.contains(#"extensionMarker = "second-id""#))
+        XCTAssertTrue(secondIDSection.contains(#"extensionMarker = "second-id""#))
+        XCTAssertFalse(secondIDSection.contains(#"extensionMarker = "first-id""#))
+        XCTAssertTrue(nameSection.contains(#"extensionMarker = "name""#))
+        XCTAssertEqual(try SettingsTOMLCodec.decode(encoded).monitorRanking, changed.monitorRanking)
+    }
+
+    func testDeletedRankingRowDropsItsExtensionAndCanClearRanking() throws {
+        var original = SettingsExport.defaults()
+        original.monitorRanking = [OutputId(displayId: 1, name: "First"), OutputId(name: "Second")]
+        var previous = try addingMarker("first", after: #"name = "First""#, to: SettingsTOMLCodec.encode(original))
+        previous = try addingMarker("second", after: #"name = "Second""#, to: previous)
+        var changed = original
+        changed.monitorRanking.removeFirst()
+
+        let encoded = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: previous)
+        let text = try utf8String(encoded)
+        XCTAssertFalse(text.contains(#"extensionMarker = "first""#))
+        XCTAssertTrue(text.contains(#"extensionMarker = "second""#))
+        XCTAssertEqual(try SettingsTOMLCodec.decode(encoded).monitorRanking, changed.monitorRanking)
+
+        changed.monitorRanking = []
+        let cleared = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: encoded)
+        XCTAssertFalse(try utf8String(cleared).contains("extensionMarker"))
+        XCTAssertTrue(try SettingsTOMLCodec.decode(cleared).monitorRanking.isEmpty)
+    }
+
+    func testRankingExtensionsDoNotTransferAcrossIdentityCategoriesOrReusedIDs() throws {
+        let uuid = OutputId(displayUUID: firstRuleID.uuidString, name: "Shared")
+        let identifier = OutputId(displayId: 1, name: "Shared")
+        let name = OutputId(name: "Shared")
+        let replacements: [(OutputId, OutputId)] = [
+            (uuid, OutputId(displayUUID: secondRuleID.uuidString, name: "Shared")),
+            (uuid, identifier),
+            (uuid, name),
+            (identifier, uuid),
+            (identifier, name),
+            (name, uuid),
+            (name, identifier),
+            (identifier, OutputId(displayId: 2, name: "Shared")),
+            (identifier, OutputId(displayId: 1, name: "Replacement"))
+        ]
+        for (source, replacement) in replacements {
+            var original = SettingsExport.defaults()
+            original.monitorRanking = [source]
+            let previous = try addingMarker(
+                "original",
+                after: #"name = "Shared""#,
+                to: SettingsTOMLCodec.encode(original)
+            )
+            var changed = original
+            changed.monitorRanking = [replacement]
+
+            let encoded = try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: previous)
+            XCTAssertFalse(try utf8String(encoded).contains("extensionMarker"), "\(source) → \(replacement)")
+            XCTAssertEqual(try SettingsTOMLCodec.decode(encoded).monitorRanking, [replacement])
+        }
+    }
+
+    func testAmbiguousRankingExtensionsStillBlockSave() throws {
+        let entry = OutputId(displayId: 1, name: "Shared")
+        let equivalent = OutputId(displayId: 1, name: "shared")
+        let rankings: [([OutputId], [OutputId])] = [([entry], [entry, equivalent]), ([entry, equivalent], [entry])]
+        for (originalRanking, changedRanking) in rankings {
+            var original = SettingsExport.defaults()
+            original.monitorRanking = originalRanking
+            let previous = try addingMarker(
+                "ambiguous",
+                after: #"name = "Shared""#,
+                to: SettingsTOMLCodec.encode(original)
+            )
+            var changed = original
+            changed.monitorRanking = changedRanking
+
+            XCTAssertThrowsError(try SettingsTOMLCodec.encode(changed, preservingUnknownKeysFrom: previous)) { error in
+                XCTAssertEqual(
+                    error as? SettingsTOMLCodecError,
+                    .cannotSafelyPreserveArrayElement("monitors.ranking[0]")
+                )
+            }
+        }
     }
 }

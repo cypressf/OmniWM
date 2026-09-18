@@ -15,12 +15,17 @@ brew install --cask omniwm
 
 Prefer Nix or a plain zip? The [installation guide](/guides/install/) covers every method plus the full requirements (macOS 26+ Tahoe on Apple Silicon).
 
+:::note[Documentation version]
+These guides follow current `main`. Features newer than the latest [GitHub release](https://github.com/BarutSRB/OmniWM/releases/latest) are marked **Unreleased**.
+:::
+
 ## First launch
 
 1. Launch OmniWM from your Applications folder.
 2. In **System Settings > Desktop & Dock > Mission Control**, turn **ON** `Displays have separate Spaces`, then log out of macOS and back in for the change to take effect (skip the logout if it was already on). OmniWM pauses window management until this setting is enabled.
 3. Grant **Accessibility** and **Input Monitoring** in the launch permissions window.
 4. Optionally grant **Screen Recording** for capture-derived visuals such as Overview thumbnails.
+5. Return to OmniWM’s permissions window and click **Start OmniWM** or **Continue Without Screen Recording**. If a required permission still appears missing, click **Check Again**.
 
 Your windows now tile automatically in orientation-aware Niri containers: monitors using horizontal orientation show columns that scroll left and right, while vertical orientation shows rows that scroll up and down.
 
@@ -50,7 +55,7 @@ OmniWM is a menu-bar-only app: click its menu bar icon to open **Settings** or *
 
 ## The config file
 
-Everything you set in the GUI is stored at `~/.config/omniwm/settings.toml`. The file is live-reloaded when saved from an editor, so you can manage OmniWM from your dotfiles too. See [Configuration](/config/configuration/).
+OmniWM configuration is stored at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml` (`~/.config/omniwm/settings.toml` by default). `XDG_CONFIG_HOME` is honored only when it is an absolute path beginning with `/`; otherwise the default applies. The file is live-reloaded when saved from an editor, so you can manage OmniWM from your dotfiles too. Start at Login and System-wide Window Corners are managed separately by macOS. See [Configuration](/config/configuration/).
 
 ## Next steps
 

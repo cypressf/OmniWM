@@ -14,12 +14,14 @@ Toggle it with `` Option + ` `` (backtick) by default; the binding is configurab
 Configure the terminal in **Settings → Quake Terminal**:
 
 - **Position** — `Top`, `Bottom`, `Left`, `Right`, or `Center`. The default is `Center`, which fades the terminal in place; the four edge positions slide it in from that screen edge.
-- **Show On** — which monitor the terminal appears on: `Mouse Cursor's Monitor`, `Focused Window's Monitor` (the default), or `Main Monitor`.
-- **Width / Height** — each 10–100% of the screen in 5% steps; both default to 50%.
+- **Show On** — which monitor the terminal appears on: `Mouse Cursor's Monitor`, `Focused Window's Monitor` (the default), or `Main Monitor`. `Main Monitor` follows the **Monitor Roles** ranking in **Settings → Monitors** when one is set, so you can pin the terminal to a preferred display with a fallback when it is disconnected; without a ranking it is the display with the macOS menu bar. See [Multi-Monitor Setup](/guides/multi-monitor/#monitor-roles).
+- **Width / Height** — each 10–100% of the monitor's available screen area in 5% steps; both default to 50%.
 
-You can also adjust the terminal directly with the mouse: drag its edges to resize, and hold `Option` and drag to move it. OmniWM remembers the size and position per monitor, and a **Reset to Default Position** button appears in Settings once a custom frame is in use.
+You can also adjust the terminal directly with the mouse: drag its edges to resize, and hold `Option` and drag to move it. OmniWM remembers one custom size and position. It reuses that frame when it fits the selected monitor; otherwise it uses the configured position and percentages. A **Reset to Default Position** button appears in Settings once a custom frame is in use.
 
 ## Appearance
+
+Quake Terminal loads Ghostty's normal configuration files and their included files, so your font, theme, and other terminal preferences can be shared. OmniWM applies its Quake background opacity and background effect afterward; configure those controls in **Settings → Quake Terminal**.
 
 - **Background Effect** — choose `Standard Blur`, `Regular Glass`, or `Clear Glass`. `Standard Blur` comes with an adjustable blur radius; the native glass effects do not, but switching effects preserves the saved Standard Blur radius so it becomes active again when you return to it.
 - **Quake Background Opacity** — 10–100%.
@@ -29,6 +31,8 @@ Blur only shows through a translucent terminal — lower the opacity to see it.
 :::
 
 ## Behavior
+
+Command-click an OSC 8 web or email hyperlink printed by a terminal application to open it in the default browser or mail app. Supported schemes are `http`, `https`, and `mailto`; file links and custom application schemes remain blocked. Plain URL detection continues to follow Ghostty's `link-url` setting.
 
 - **Animation Duration** — 0 to 1 second, default 0.2s. Ignored while global animations are disabled.
 - **Auto-hide on Focus Loss** — optionally hide the terminal whenever it loses focus.

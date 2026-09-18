@@ -32,10 +32,17 @@ Workspace homes and other per-monitor settings are separate from these saved rou
 
 Layout behavior follows each display rather than one global setting: monitors using horizontal orientation show Niri columns that scroll left and right, while vertical orientation shows rows that scroll up and down. See [Layout Modes](/guides/layouts/).
 
-Two settings shape how windows travel between displays:
+Three settings shape how focus and windows travel between displays:
 
-- **Move Window Across Monitor at Edge** governs whether moving a window past a workspace edge carries it to the adjacent display. The dedicated `Move Window to Left / Right / Up / Down Monitor` actions work independently of it: they send the focused window directly to the current workspace on the adjacent routed display and do not wrap when no monitor exists in that direction.
-- **Follow Window to Monitor** controls whether focus follows a window sent to another monitor; when it is off, you remain in the source workspace.
+- **Focus Across Monitor at Edge** (`focus.crossesMonitorAtEdge`) lets directional focus continue to the adjacent routed display when it reaches a layout edge. It is off by default.
+- **Move Window Across Monitor at Edge** sends a window beyond a workspace edge to the adjacent routed display and always follows it. The dedicated `Move Window to Left / Right / Up / Down Monitor` actions work independently of this setting: they send the focused window directly to the current workspace on the adjacent routed display and do not wrap when no monitor exists in that direction.
+- **Follow Window to Monitor** controls whether focus follows ordinary window or column transfers to another workspace, including the dedicated monitor-move actions. When it is off, those transfers leave you in the source workspace; edge-crossing moves always follow.
+
+## Monitor roles
+
+A workspace's home can be **Main**, **Secondary**, **Tertiary**, or a specific display. By default Main is the display with the macOS menu bar and Secondary and Tertiary are the next displays in arrangement order, which leaves you no say over which of two external displays plays which role.
+
+The **Monitor Roles** list in **Settings > Monitors** fixes that. Add displays with **Add Monitor** and reorder them with the arrows: the highest-ranked connected display becomes Main, the next becomes Secondary, the third becomes Tertiary, and unranked displays follow after them. Disconnected entries stay in the list and are skipped, so ranking `DELL, LG, Built-in` gives the two externals the Main and Secondary roles at your desk and hands Main back to the built-in display when you unplug. The Quake terminal's **Main Monitor** option follows the same Main. Leave the list empty to keep the default behavior. See [`monitors` in the Settings Reference](/config/settings-reference/#monitors) for the configuration format.
 
 ## Workspaces and their home monitor
 

@@ -5,10 +5,10 @@ sidebar:
   order: 1
 ---
 
-OmniWM stores its editable configuration at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`. That file is the canonical settings source: it is live-reloaded whenever you save it from an editor, and every change made in the Settings window is written back to it. Current files include the top-level key `schemaVersion = 4`.
+OmniWM stores its editable configuration at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`. `XDG_CONFIG_HOME` is honored only when it is an absolute path beginning with `/`; otherwise OmniWM uses `~/.config/omniwm/settings.toml`. That file is the canonical settings source: it is live-reloaded whenever you save it from an editor, and OmniWM configuration changes made in the Settings window are written back to it. Current files include the top-level key `schemaVersion = 3`.
 
 :::caution[The schema is strict]
-After version upgrades, `settings.toml` is validated as a whole. In a version 4 file, a missing required key invalidates the **entire file**, and the `hotkeys` array must contain every assignable action **exactly once** — an unknown, duplicate, or missing action id rejects the file. Enumerated string keys must use one of their listed values; an unknown value rejects the whole file too. The safest way to edit is to change values in place (or use the Settings window) rather than deleting keys. See the [Settings Reference](/config/settings-reference/) for every key and its default.
+After version upgrades, `settings.toml` is validated as a whole. In a version 3 file, a missing required key invalidates the **entire file**, and the `hotkeys` array must contain every assignable action **exactly once** — an unknown, duplicate, or missing action id rejects the file. Enumerated string keys must use one of their listed values; an unknown value rejects the whole file too. The safest way to edit is to change values in place (or use the Settings window) rather than deleting keys. See the [Settings Reference](/config/settings-reference/) for every key and its default.
 :::
 
 ## Opening the file
@@ -22,7 +22,9 @@ Both commands recreate the file from the running settings if it was deleted, so 
 
 ## Settings window
 
-Every setting is also editable in the SwiftUI Settings window, organized into 14 sections (General, Troubleshooting, Niri Layout, Dwindle Layout, Monitors, Workspaces, Overview, Borders, Workspace Bar, Hidden Bar, Hotkeys, Mouse & Trackpad, Quake Terminal, Report an Issue). **App Rules** opens as its own window from the status menu. The window is a front end for the TOML — `settings.toml` remains the source of truth either way.
+Most settings are editable in the SwiftUI Settings window, organized into 14 sections (General, Troubleshooting, Niri Layout, Dwindle Layout, Monitors, Workspaces, Overview, Borders, Workspace Bar, Hidden Bar, Hotkeys, Mouse & Trackpad, Quake Terminal, Report an Issue). **App Rules** opens as its own window from the status menu. Clipboard retention limits and scratchpad labels are edited in TOML; clipboard history can be enabled from the [Command Palette's Clipboard mode](/features/command-palette/#clipboard-history).
+
+**Start at Login** is managed by macOS, and **System-wide Window Corners** changes a macOS preference. Neither is stored in `settings.toml`.
 
 **Settings > General** also carries a **System-wide Window Corners** control (macOS 26.4+). It writes the system-wide preference, so it changes standard Mac app windows everywhere — including windows OmniWM does not manage — and apps that draw their own window chrome may ignore it. Affected apps must be fully quit and reopened before the new radius applies.
 
@@ -34,18 +36,17 @@ Every setting is also editable in the SwiftUI Settings window, organized into 14
 
 ### Automatic version upgrades
 
-A file without `schemaVersion` is a legacy version 0 file; OmniWM v0.6.4 emitted version 1 files, and v0.6.5 through v0.6.9 emitted version 3 files. OmniWM guarantees automatic upgrades for settings emitted by v0.6.2 through v0.6.9 and upgrades valid version 2 files as well. Version 0 files pass through the version 1, version 2, version 3, and version 4 migrations in memory. Later files start at their next step without rerunning earlier migrations. Only the final strict version 4 file is written:
+A file without `schemaVersion` is a legacy version 0 file; OmniWM v0.6.4 emitted version 1 files. OmniWM guarantees automatic upgrades for settings emitted by v0.6.2 through v0.6.4 and upgrades valid version 2 files as well. Version 0 files pass through the version 1, version 2, and version 3 migrations in memory. Version 1 and version 2 files start at their next step without rerunning earlier migrations. Only the final strict version 3 file is written:
 
 - Missing settings introduced since version 0 receive their compatibility defaults. In particular, `focus.raiseOnMouseFocus` becomes `true` to preserve the old behavior; `gaps.fullscreenUsesOuterGaps` and `workspaceBar.hideInNativeFullscreen` become `false`; and `scratchpads.labels` starts empty.
 - The version 0 hotkey step adds the required scratchpad slot entries. The old `assignFocusedWindowToScratchpad` and `toggleScratchpadWindow` ids become their slot 1 equivalents while preserving the configured triggers; an explicitly configured slot 1 id wins if both forms are present.
 - The retired `consumeOrExpelWindowLeft` and `consumeOrExpelWindowRight` actions are removed. Diagnostics suggest the current replacement commands.
 - The version 1 to version 2 step adds the 18 `switchWorkspaceSlot.N` and `moveToWorkspaceSlot.N` entries plus `closeFocusedWindow`, all unassigned unless already present. Final validation still rejects any unrelated unknown, duplicate, or missing hotkey id.
 - The version 2 to version 3 step moves a nonempty `monitorRoutingOverrides` array into one `routing.arrangements` entry with a stable UUID. An empty array becomes no arrangements. All original monitor rows and their unrecognized fields remain intact, including rows for disconnected displays; the migration does not query displays. Custom routing can inherit that arrangement for a connected subset. A missing, non-array, or malformed old routing field rejects the configuration without rewriting it.
-- The version 3 to version 4 step adds the trackpad window gesture keys `gestures.windowMoveEnabled`, `gestures.windowMoveFingerCount`, `gestures.windowResizeEnabled`, `gestures.windowResizeFingerCount`, and `gestures.windowGestureSensitivity` with their defaults (both gestures off) when they are missing. Keys already present keep their values.
 
-Before rewriting version 0, 1, 2, or 3, OmniWM copies its exact original bytes to the write-once backup `settings.toml.pre-v4`, using `settings.toml.pre-v4.1` if the first slot already contains different data. An existing byte-for-byte identical backup is reused. If neither slot is safe to use or the backup cannot be written, OmniWM leaves the original file untouched, applies the upgraded settings only in memory, and blocks subsequent settings writes so the original cannot be overwritten.
+Before rewriting version 0, 1, or 2, OmniWM copies its exact original bytes to the write-once backup `settings.toml.pre-v3`, using `settings.toml.pre-v3.1` if the first slot already contains different data. An existing byte-for-byte identical backup is reused. If neither slot is safe to use or the backup cannot be written, OmniWM leaves the original file untouched, applies the upgraded settings only in memory, and blocks subsequent settings writes so the original cannot be overwritten.
 
-After a successful backup, OmniWM atomically rewrites the file once as canonical version 4 TOML. The rewrite preserves unrecognized keys, the target of a symlink, and file permissions, but it can reorder the document and does not preserve comments. The pre-v4 backup retains the exact original text. If the rewrite fails, the original file remains intact and subsequent configuration writes are blocked. A valid release migration never creates a `.corrupt` backup; those recovery slots are reserved for a genuinely rejected file that is later replaced by an explicit settings save.
+After a successful backup, OmniWM atomically rewrites the file once as canonical version 3 TOML. The rewrite preserves unrecognized keys, the target of a symlink, and file permissions, but it can reorder the document and does not preserve comments. The pre-v3 backup retains the exact original text. If the rewrite fails, the original file remains intact and subsequent configuration writes are blocked. A valid release migration never creates a `.corrupt` backup; those recovery slots are reserved for a genuinely rejected file that is later replaced by an explicit settings save.
 
 Config logs and the built-in Diagnostics report every defaulted path, mapped or retired hotkey, and the backup location. Paths shown there use the resolved XDG config directory, including a custom `XDG_CONFIG_HOME`.
 
@@ -53,7 +54,9 @@ Older schema-less files are attempted through the same migration, but are outsid
 
 ## Runtime state lives elsewhere
 
-Volatile runtime state is kept out of the config file so `settings.toml` stays clean for dotfile management. Clipboard history, update-check timestamps, the persisted window restore catalog (including Niri column and Dwindle tree placements), the Quake terminal's custom frame, and the last palette mode live in `${XDG_STATE_HOME:-$HOME/.local/state}/omniwm`.
+Volatile runtime state is kept out of the config file so `settings.toml` stays clean for dotfile management. Clipboard history, update-check timestamps, the persisted window restore catalog (including Niri column and Dwindle tree placements), the Quake terminal's custom frame, and the last palette mode live in `${XDG_STATE_HOME:-$HOME/.local/state}/omniwm`. `XDG_STATE_HOME` is honored only when it is an absolute path beginning with `/`; otherwise OmniWM uses `~/.local/state/omniwm`.
+
+The separate **OmniWM Dev** app uses `omniwm-dev` instead of `omniwm` for both its config and state directories. See [Building from Source](/developers/building/) for the development build workflow.
 
 ## What's in the file
 
@@ -65,6 +68,7 @@ The full schema is documented key by key in the [Settings Reference](/config/set
 | [`[focus]`](/config/settings-reference/#focus) | Focus-follows-mouse and monitor-edge focus behavior |
 | [`[mouseWarp]`](/config/settings-reference/#mousewarp) | Cursor warping between monitors |
 | [`[routing]`](/config/settings-reference/#routing) | macOS vs. custom routing and saved arrangements per connected display set |
+| [`[monitors]`](/config/settings-reference/#monitors) | Optional ranking that decides which connected display is Main, Secondary, and so on |
 | [`[gaps]`](/config/settings-reference/#gaps) | Inner and outer gaps |
 | [`[niri]`](/config/settings-reference/#niri) | Scrolling (Niri) layout options |
 | [`[dwindle]`](/config/settings-reference/#dwindle) | Dwindle (BSP) layout options |

@@ -308,6 +308,23 @@ OmniWM is a free, open-source, Developer ID-signed and Apple-notarized tiling wi
       <sub>@holmns</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/olincollege">
+        <img src="https://avatars.githubusercontent.com/u/68605531?v=4" width="72" alt="Olin College of Engineering">
+      </a>
+      <br>
+      <a href="https://github.com/olincollege"><strong>Olin College of Engineering</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/cypressf" title="Cypress Frankenfeld">
+        <img src="https://github.com/cypressf.png?size=96" width="72" alt="Cypress Frankenfeld">
+      </a>
+      <br>
+      <a href="https://github.com/cypressf"><strong>Cypress Frankenfeld</strong></a>
+      <br>
+      <sub>@cypressf</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://www.sustech.edu.cn/en/">
         <img src="https://www.google.com/s2/favicons?domain=www.sustech.edu.cn&sz=96" width="72" alt="SUSTech">
       </a>
@@ -348,6 +365,9 @@ OmniWM is a free, open-source, Developer ID-signed and Apple-notarized tiling wi
       <a href="https://github.com/Cy6erBr4in" title="Alexander Dergachev">
         <img src="https://github.com/Cy6erBr4in.png?size=96" width="72" alt="Alexander Dergachev">
       </a>
+      <a href="https://github.com/minchik" title="Aliaksandr">
+        <img src="https://github.com/minchik.png?size=96" width="72" alt="Aliaksandr">
+      </a>
       <a href="https://github.com/gloomy-breaker" title="Ayaan Sandhu">
         <img src="https://github.com/gloomy-breaker.png?size=96" width="72" alt="Ayaan Sandhu">
       </a>
@@ -363,8 +383,17 @@ OmniWM is a free, open-source, Developer ID-signed and Apple-notarized tiling wi
       <a href="https://github.com/crbelaus" title="Cristian Álvarez Belaustegui">
         <img src="https://github.com/crbelaus.png?size=96" width="72" alt="Cristian Álvarez Belaustegui">
       </a>
+      <a href="https://github.com/cypressf" title="Cypress Frankenfeld">
+        <img src="https://github.com/cypressf.png?size=96" width="72" alt="Cypress Frankenfeld">
+      </a>
       <a href="https://github.com/nekonora" title="Filippo Zaffoni">
         <img src="https://github.com/nekonora.png?size=96" width="72" alt="Filippo Zaffoni">
+      </a>
+      <a href="https://github.com/Fletcher-Alderton" title="Fletcher Alderton">
+        <img src="https://github.com/Fletcher-Alderton.png?size=96" width="72" alt="Fletcher Alderton">
+      </a>
+      <a href="https://github.com/henrikhestnes" title="Henrik Larsson Hestnes">
+        <img src="https://github.com/henrikhestnes.png?size=96" width="72" alt="Henrik Larsson Hestnes">
       </a>
       <a href="https://github.com/henry-p" title="Henry Perschk">
         <img src="https://github.com/henry-p.png?size=96" width="72" alt="Henry Perschk">
@@ -383,6 +412,9 @@ OmniWM is a free, open-source, Developer ID-signed and Apple-notarized tiling wi
       </a>
       <a href="https://github.com/zucram" title="Marcus Harlid Davin">
         <img src="https://github.com/zucram.png?size=96" width="72" alt="Marcus Harlid Davin">
+      </a>
+      <a href="https://github.com/MateuszJuszczyk" title="Mateusz Juszczyk">
+        <img src="https://github.com/MateuszJuszczyk.png?size=96" width="72" alt="Mateusz Juszczyk">
       </a>
       <a href="https://github.com/wicksipedia" title="Matt Wicks">
         <img src="https://github.com/wicksipedia.png?size=96" width="72" alt="Matt Wicks">
@@ -428,6 +460,9 @@ OmniWM is a free, open-source, Developer ID-signed and Apple-notarized tiling wi
       </a>
       <a href="https://github.com/Yang-Yiming" title="Yang-Yiming">
         <img src="https://github.com/Yang-Yiming.png?size=96" width="72" alt="Yang-Yiming">
+      </a>
+      <a href="https://github.com/YeungKC" title="YeungKC">
+        <img src="https://github.com/YeungKC.png?size=96" width="72" alt="YeungKC">
       </a>
       <a href="https://github.com/YuriNachos" title="Yuri Chukhlib">
         <img src="https://github.com/YuriNachos.png?size=96" width="72" alt="Yuri Chukhlib">
@@ -489,6 +524,7 @@ OmniWM is built for high responsiveness and smooth, crisp animations.
 ## Requirements
 
 - macOS 26+ (Tahoe) on Apple Silicon
+- Hidden Bar concealment and optional issue-report rewriting require macOS 27 or later; rewriting also requires enabled Apple Intelligence and an available local model
 - Accessibility and Input Monitoring permissions (required at launch)
 - Screen Recording permission for Overview thumbnails, drag previews, and captured Hidden Bar glyphs (optional)
 - Displays have separate spaces **ON** (the macOS default; OmniWM pauses window management until it is enabled)
@@ -546,7 +582,12 @@ programs.omniwm = {
 };
 ```
 
-After either installation, complete the macOS setup in steps 3-6 below.
+Treat the declared TOML file or attribute set as authoritative: edit it and run Home Manager switch to apply
+changes. OmniWM preserves settings symlinks, so settings backed by a read-only Nix-store file cannot be saved
+from the GUI. Set `programs.omniwm.launchd.enable = false` if you prefer to start and quit OmniWM manually
+instead of having Home Manager manage its launchd agent.
+
+After either installation, complete the macOS setup in steps 3-7 below.
 
 ### GitHub Releases
 
@@ -556,6 +597,7 @@ After either installation, complete the macOS setup in steps 3-6 below.
 4. Log out of macOS and log back in for that change to take effect unless you had it on already
 5. Launch OmniWM and grant Accessibility and Input Monitoring when prompted
 6. Optionally grant Screen Recording for capture-derived visuals
+7. Return to OmniWM’s permissions window and click **Start OmniWM** or **Continue Without Screen Recording**. If a required permission still appears missing, click **Check Again**
 
 ## Updates
 
@@ -568,7 +610,7 @@ OmniWM checks for updates by default.
 
 ## Documentation
 
-The canonical documentation hub lives at [omniwm.app](https://omniwm.app).
+The canonical documentation hub lives at [omniwm.app](https://omniwm.app). This README and the guides follow current `main`; features newer than the latest release are marked **Unreleased**.
 
 - [Documentation Home](https://omniwm.app/guides/quick-start/)
 - [Layout Modes](https://omniwm.app/guides/layouts/)
@@ -593,7 +635,7 @@ For setup, installation options, commands, queries, rules, subscriptions, and se
 1. Launch OmniWM from your Applications folder
 2. In System Settings > Desktop & Dock > Mission Control, turn **ON** `Displays have separate Spaces`
 3. Log out of macOS and log back in for that change to take effect unless you had it on already
-4. Grant Accessibility and Input Monitoring in the launch permissions window
+4. Grant Accessibility and Input Monitoring in the launch permissions window, and optionally Screen Recording. Return to that window and click **Start OmniWM** or **Continue Without Screen Recording**; use **Check Again** if a required permission still appears missing
 5. Windows will automatically tile in orientation-aware Niri containers: monitors using horizontal orientation show columns that scroll left and right, while vertical orientation shows rows that scroll up and down
 6. Keep one macOS Space per display and navigate with OmniWM workspaces; extra native Spaces are tolerated (their windows are left to macOS, not tiled)
 7. Use the defaults in [Keyboard Shortcuts](#keyboard-shortcuts) to navigate, and customize them in `Settings > Hotkeys`
@@ -617,6 +659,10 @@ OmniWM uses two display maps for different jobs:
 The setup assistant opens automatically when OmniWM first sees multiple displays. To review or redo it later, choose **Run Monitor Setup…** in **Settings > Monitors**. The assistant's **Show Numbers on Screens** action helps match each physical display to its tile. Routing, workspace-home, and Mouse Warp changes remain drafts until you finish the assistant.
 
 Custom arrangements are remembered for each set of connected displays, so home and work can keep different positions for the same laptop display. Reconnecting a saved set restores its arrangement automatically. If there is no exact match, OmniWM inherits the smallest saved arrangement containing every connected display; an uncovered set or an invalid grid follows macOS. Editing, resetting, or finishing setup saves only the connected set, leaving any larger arrangement unchanged. Simply connecting displays or opening Settings does not save an arrangement. Workspace assignments and other per-monitor settings remain separate.
+
+**Move Window Across Monitor at Edge** sends a window beyond a workspace edge to the adjacent routed display and always follows it. Dedicated monitor-move actions work independently of this setting and use **Follow Window to Monitor**, which also controls focus after ordinary window or column transfers to another workspace.
+
+Workspace homes can be **Main**, **Secondary**, **Tertiary**, or a specific display. By default Main is the display with the macOS menu bar and Secondary and Tertiary are the next displays in arrangement order. The **Monitor Roles** list in **Settings > Monitors** lets you rank displays instead: the highest-ranked connected display is Main, then Secondary, then Tertiary, and disconnected entries are skipped, so two external displays can hold fixed roles at your desk while the built-in display takes over when you unplug. The Quake terminal's **Main Monitor** option follows the same ranking.
 
 ### Layout Modes
 
@@ -645,6 +691,8 @@ Settings hides advanced actions from the shortcut list by default. Turn on `Incl
 |--------|------------------|--------|
 | Switch to Workspace 1-9 | `Option + 1-9` | `Shared` |
 | Move Window to Workspace 1-9 | `Option + Shift + 1-9` | `Shared` |
+| Switch to Workspace Slot 1-9 (position on the current monitor) | `Unassigned` | `Shared` |
+| Move to Workspace Slot 1-9 (position on the current monitor) | `Unassigned` | `Shared` |
 | Switch to Last Active Workspace (Back and Forth) | `Control + Option + Tab` | `Shared` |
 | Switch to Next Workspace | `Unassigned` | `Shared` |
 | Switch to Previous Workspace (Sequential) | `Unassigned` | `Shared` |
@@ -671,6 +719,7 @@ Settings hides advanced actions from the shortcut list by default. Turn on `Incl
 | Focus Window 1-9 in Column | `Unassigned` | `Niri` |
 | Toggle Command Palette | `Control + Option + Space` | `Shared` |
 | Open Menu Anywhere | `Control + Option + M` | `Shared` |
+| Close Focused Window | `Unassigned` | `Shared` |
 | Toggle Workspace Bar | `Unassigned` | `Shared` |
 | Toggle Hidden Icons Bar | `Unassigned` | `Shared` |
 | Toggle Quake Terminal | `` Option + ` `` | `Shared` |
@@ -786,14 +835,19 @@ The unassigned advanced actions are available in Settings > Hotkeys. `Focus Down
 
 #### Quake Terminal
 
-A true quake/sticky terminal (powered by Ghostty's libghostty) that slides in from the screen edge and:
+A true quake/sticky terminal powered by Ghostty's libghostty. The default Center position fades it in place; Top, Bottom, Left, and Right slide it in from that screen edge.
+
 - Toggle it from the global shortcut shown in `Keyboard Shortcuts`
 - Supports multiple tabs and splits within tabs
 - Tab and pane shortcuts are listed in **Quake Terminal (Inside Terminal)**
-- Mouse resize by dragging edges; `Option + drag` to move (remembers size/position per monitor)
-- Configure position (top/bottom/left/right/center), size, opacity, and background effect in Settings
+- Mouse resize by dragging edges; `Option + drag` to move
+- Configure position, width and height as percentages of the monitor's available screen area, opacity, and background effect in Settings
 - Choose Standard Blur with an adjustable radius or native Regular Glass/Clear Glass; switching effects preserves the saved Standard Blur radius
 - Auto-hides on focus loss (optional)
+
+OmniWM remembers one custom size and position. It reuses that frame when it fits the selected monitor; otherwise it uses the configured position and percentages. **Reset to Default Position** appears in Settings once a custom frame is in use.
+
+Quake Terminal loads Ghostty's normal configuration files and their included files, so font, theme, and other terminal preferences can be shared. OmniWM applies its Quake background opacity and effect afterward; configure those in **Settings → Quake Terminal**.
 
 #### Command Palette
 
@@ -801,20 +855,24 @@ Quickly search windows, app menus, or clipboard history from one shared palette:
 - Open it from the global shortcut shown in `Keyboard Shortcuts`
 - Use `Tab` / `Shift + Tab` to cycle forward or backward through the available modes
 - Use `Cmd + 1` for `Windows`, `Cmd + 2` for `Menu`, and `Cmd + 3` for `Clipboard`
-- Type to fuzzy-search by window title, app name, menu item, or clipboard content
+- Type to search by substring; window-title matches rank first, followed by app-name and workspace-name matches
 - Menu results always show keyboard shortcuts when available
 - `Up` / `Down` move the selection
 - `Enter` activates the selected result
 - Windows from macOS-hidden apps remain searchable with a Hidden badge; selecting one unhides its app and focuses that exact window
-- `Shift + Enter` summons the selected window to the right when available
+- In Windows mode, `Shift + Enter` summons the selected window to the right when available
+- In Clipboard mode, `Enter` copies the selected entry and pastes it into the previous app when that target is still available; `Shift + Enter` copies without pasting
 - `Escape` dismisses the palette
+
+Clipboard history starts disabled. Open Clipboard mode (`Cmd + 3`) and click **Enable**, or set `clipboard.historyEnabled = true` in `settings.toml`. History retains supported text, rich text, HTML, images, and file references within the configured limits; items marked concealed, transient, or autogenerated, including recognized password-manager markers, are skipped. Each row has Copy and Delete actions, and the trash button clears the history. See the [command palette guide](https://omniwm.app/features/command-palette/#clipboard-history) for storage details.
 
 #### Menu Anywhere
 
-Access any application's menu from your keyboard:
-- Shows the native menu at the cursor from a global shortcut
+Open the frontmost app's menus at your cursor with a global shortcut. Menu Anywhere builds a native floating menu from the menus, submenus, and shortcuts the app exposes through Accessibility.
 
 #### Overview Mode
+
+Overview supports [trackpad opening and closing](https://omniwm.app/features/overview/), with finger tracking when animations are enabled.
 
 See all windows at once with thumbnails:
 - Open it from the global shortcut shown in `Keyboard Shortcuts`
@@ -828,7 +886,7 @@ See all windows at once with thumbnails:
 - Adjacent-workspace fallback actions can create the next compatible unused numeric workspace when moving past the current workspace edge
 - In Dwindle workspaces, Overview supports moving windows across workspaces and closing them without adding Overview-only tree placement controls
 - A successful move keeps the moved window selected and activates its destination workspace and monitor behind Overview
-- `Option + drag` a thumbnail onto a workspace, an exact window position, or a Niri column gap; layouts without an exact placement equivalent fall back to moving it to the destination workspace
+- Drag a thumbnail onto a workspace, an exact window position, or a Niri column gap; layouts without an exact placement equivalent fall back to moving it to the destination workspace. Press and release without dragging to focus it
 - `Command + W` closes the selected window once per press and keeps Overview open; selection advances only after the window has closed
 - `Enter`, `Escape`, the configured Overview shortcut, and clicking the backdrop dismiss Overview and focus the current selection; `Escape` does not clear search first
 - If another application takes focus, Overview dismisses without stealing focus back
@@ -845,6 +903,28 @@ A visual indicator showing your workspaces:
 - Optionally hide the bar on a monitor while that monitor shows a macOS native fullscreen window, and bring it back on exit (`Hide in Native Fullscreen`); reserved tiled layout space is left untouched so windows do not shuffle around the fullscreen session
 - Exclude individual apps or choose alternate app icons across all monitors in Settings
 
+Workspace-bar appearance controls are optional and also support per-monitor overrides:
+
+- **Transparent Background** removes the outer bar material, tint, and border; icons remain clickable. It takes precedence over **Solid Black Background**.
+- **Solid Black Background** uses opaque black instead of the outer bar's material and tint.
+- **Inactive Icon Opacity** adjusts non-focused app icons. Leaving it unset preserves the standard opacity for each kind of item; hidden-app icons retain their hidden-state appearance. Values are limited to 0–1, and nonfinite values are treated as unset.
+- Disable **Show Item Backgrounds** to remove the backgrounds behind workspace groups, floating windows, scratchpads, and the stats button.
+- Disable **Show Accent Highlights** to remove focused-item accent outlines and glows without changing focus behavior.
+- **Fill Left of Notch** covers the menu-bar band from the display's left edge to the notch, or to the display midpoint when no notch is present. This deliberately covers application menus; choose another notch mode to access them again. This mode uses the menu-bar height, ignores position/offset/height controls, and does not reserve extra tiled layout space. It always hides on displays showing native fullscreen content; other modes continue to follow **Hide in Native Fullscreen**.
+
+Existing appearance stays unchanged until you opt in. For example, edit these keys inside the existing `[workspaceBar]` table (do not replace the complete configuration with this fragment):
+
+```toml
+transparentBackground = false
+solidBlackBackground = true
+inactiveIconOpacity = 0.9
+showItemBackgrounds = false
+showAccentHighlights = false
+notchMode = "fillLeftOfNotch"
+```
+
+These optional settings keep configuration schema 3. Omitted keys preserve the existing appearance without migrating the settings file.
+
 Workspace-bar icon overrides can also be configured in `settings.toml`. Quote bundle IDs so TOML treats each dotted identifier as one key:
 
 ```toml
@@ -858,7 +938,7 @@ Workspace-bar icon overrides can also be configured in `settings.toml`. Quote bu
 #### Hidden Bar
 
 Conceal selected menu-bar icons and reach them from a panel:
-- Concealment requires macOS 27 or later; the rest of OmniWM continues to support macOS 26
+- Concealment requires macOS 27 or later; core window management supports macOS 26
 - Pick the apps to hide in `Settings > Hidden Bar`
 - Right-click (or Option-click) the OmniWM menu bar icon to open the Hidden Icons Bar; click an icon to reveal and use it
 - Revealed icons re-hide automatically after a configurable interval
@@ -868,17 +948,17 @@ Conceal selected menu-bar icons and reach them from a panel:
 
 - **Workspaces** - Create named workspaces in Settings to organize by project or context (You can use emojis 🥳)
 - **App Rules** - Exclude problematic apps from tiling or assign them to specific workspaces
-- **Mouse** - On the Niri desktop, hold the configured mouse-move modifier and drag to swap tiled windows; add `Shift` to insert into a column. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In Overview, `Option + drag` targets a workspace, window position, or Niri column gap
+- **Mouse** - Hold the configured mouse-move modifier and drag to swap tiled windows. Niri swaps individual windows; add `Shift` to insert into a column. Dwindle swaps whole tiles, including their tab groups. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In Overview, dragging a thumbnail needs no modifier and targets a workspace, window position, or Niri column gap
 - **Mouse Resize** - Hold the configured right-mouse resize modifier (`Option` by default) and right-drag a tiled window to resize it in either layout
 - **Scroll Gestures (Mouse)** - Hold `Option + Shift + Mouse Scroll Wheel` (default, configurable) to scroll along the active Niri primary axis: left/right in horizontal orientation or up/down in vertical orientation
 - **Trackpad Gestures** - Use 2/3/4-finger gestures (configurable) along the active Niri primary axis; direction can be inverted (local hardware validation is limited)
-- **Window Move & Resize (Trackpad)** - Opt-in in Settings → Mouse & Trackpad: drag with a configurable finger count (default four to move, three to resize) without clicking to move or resize the tiled window under the cursor, Hyprland-style; lift your fingers to drop. Palm-sized contacts are ignored and a gesture only starts within 150 ms of the first finger landing, so a palm heel settling mid-scroll cannot turn a two-finger scroll into a resize. A window gesture claims its finger count, so column scrolling or workspace swipe on the same count stop firing. Turn off the matching macOS three- or four-finger gestures in  → System Settings → Trackpad → More Gestures first.
-- **Workspace Swipe (Trackpad)** - Opt-in in Settings → Mouse & Trackpad: swipe with a configurable finger count (2/3/4) and axis (horizontal/vertical) to switch to the next/previous workspace on the monitor under the cursor, one switch per swipe; sharing the column-scroll finger count locks the axis to vertical. For vertical swipes with three or four fingers, first turn off Mission Control in  → System Settings → Trackpad → More Gestures so macOS does not intercept the gesture.
+- **Window Move & Resize (Trackpad)** - Opt-in in Settings → Mouse & Trackpad: drag without clicking to move or resize the tiled window under the cursor in either layout; lift your fingers to drop. Palm-sized contacts are ignored and a gesture only starts within 150 ms of the first finger landing, so a palm heel settling mid-scroll cannot turn a two-finger scroll into a resize. Defaults are four fingers to move and three to resize. Choose finger counts unused by other enabled gestures; **Set Up…** previews conflicts and lets you choose which gestures to turn off before applying the assignment. Turn off matching macOS gestures in System Settings → Trackpad → More Gestures to prevent them firing alongside window gestures.
+- **Workspace Swipe (Trackpad)** - Opt-in in Settings → Mouse & Trackpad: swipe with a configurable finger count (2/3/4) and axis (horizontal/vertical) to switch to the next/previous workspace on the monitor under the cursor, one switch per swipe; when sharing fingers with enabled column scrolling in Niri, workspace swipes use the perpendicular axis on each display; otherwise they use the selected axis. For vertical swipes with three or four fingers, first turn off Mission Control in  → System Settings → Trackpad → More Gestures so macOS does not intercept the gesture.
 
 ## Configuration
 
 Access settings by clicking OmniWM's status bar icon and selecting **Settings** or **App Rules**.
-Mouse and gesture settings live in Settings under **Mouse & Trackpad**.
+Mouse and gesture settings live in Settings under **Mouse & Trackpad**. The **Trackpad Gestures** panel shows all five assignments together. Finger selectors work while a gesture is off; **Set Up…** explains conflicts and offers explicit reassignment choices before turning anything off. Expand a gesture row for its additional controls.
 
 **Settings > General** also carries a **System-wide Window Corners** control (macOS 26.4+). It writes the system-wide
 preference, so it changes standard Mac app windows everywhere — including windows OmniWM does not manage — and apps
@@ -886,6 +966,10 @@ that draw their own window chrome may ignore it. Affected apps must be fully qui
 applies.
 
 OmniWM stores its editable config at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`; that file is the canonical settings source and is live-reloaded when saved from an editor.
+
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are honored only when set to absolute paths; otherwise OmniWM uses `~/.config` and `~/.local/state`, respectively.
+
+Most configuration is also editable in Settings. **Start at Login** is managed by macOS, and **System-wide Window Corners** changes a macOS preference; neither is stored in `settings.toml`. Clipboard retention limits and scratchpad labels are edited in TOML.
 
 - **Reveal Settings File** and **Edit Settings File** open the canonical TOML file and recreate it from the running settings if it was deleted.
 - `updateChecksEnabled` is part of the persisted settings model, so it round-trips through `settings.toml`.
@@ -898,9 +982,9 @@ you are looking at. There are ten slots, numbered 1 to 10; a slot with no window
 invisible.
 
 - **Assign Focused Window to Scratchpad N** moves the focused window into slot N, floating it if it
-  was tiled and parking it off-screen. Pressing the same shortcut again on a window already in slot N
-  returns it to the layout.
-- **Toggle Scratchpad N** reveals every window in slot N on the monitor you are interacting with, or
+  was tiled. It stays visible if slot N is already revealed; otherwise it is parked off-screen. Pressing
+  the same shortcut again on a window already in slot N returns it to the layout.
+- **Toggle Scratchpad N** reveals eligible windows in slot N on the monitor you are interacting with, or
   parks them again if they are already there. Revealing a slot parks whichever slot was showing, so at
   most one scratchpad is on screen at a time.
 - A revealed scratchpad follows you across workspace switches and stays up until you toggle it off.
@@ -908,6 +992,10 @@ invisible.
 - Revealed windows are ordinary floating windows: whether clicking something underneath pushes them
   behind it is governed by the usual focus and raise behaviour, including **Raise Window When Focus
   Follows Mouse**.
+
+Hotkey and CLI toggles leave macOS-hidden apps hidden and skip windows suspended in native fullscreen.
+Clicking a workspace-bar pill while the slot is hidden can unhide its apps; exit native fullscreen before
+revealing a suspended window.
 
 Each non-empty slot gets a pill in the workspace bar showing its name and its windows' icons; clicking
 the pill toggles that scratchpad. Slots are identified by number everywhere, and an optional label
@@ -953,23 +1041,7 @@ initialContainerPrimarySpan = 0.5
 
 ## Building from Source
 
-Requirements:
-- SwiftPM with Swift 6.4+
-- macOS 26.0+
-- A complete GhosttyKit xcframework at `Frameworks/GhosttyKit.xcframework`. Download the latest
-  `GhosttyKit.xcframework-v<version>.zip` asset from [Releases](https://github.com/BarutSRB/OmniWM/releases) and extract
-  it into `Frameworks/`, or replace the complete bundle with one you build from Ghostty.
-- The build preflight verifies the internal arm64 archive at the path pinned in `Scripts/build-metadata.env` (currently
-  `Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal.a`) is arm64-only and matches the pinned SHA-256.
-  If you rebuild GhosttyKit, replace the complete xcframework and update the metadata pin.
-
-Use the bundled Debug launch for day-to-day development:
-
-```bash
-make run
-```
-
-`make run` builds, packages, development-signs, and opens `dist/OmniWM.app` through LaunchServices. This is the canonical development launch because it gives OmniWM its normal app identity. OmniWM uses its native status bar item while Hidden Bar concealment is inactive. While concealment is active, it uses a separate fallback icon beside a visible workspace bar, or near the display's top center when no workspace bar is visible, because macOS can conceal the app-owned status item with the other restricted items. This behavior applies to both bundled and raw `swift run OmniWM` launches and is not specific to Debug builds.
+Follow the [contributor quick start](CONTRIBUTING.md#quick-start) for Xcode requirements, automatic dependency setup, and a separate **OmniWM Dev** app with independent settings. The guide covers rebuilding, switching back to your normal app, and verifying a pull request.
 
 ## Community Integrations
 
@@ -981,6 +1053,10 @@ make run
 
 - **[Nehir](https://github.com/apphane-dev/nehir)** is an endorsed OmniWM fork focused on a narrower, more opinionated Niri-style scrolling-column workflow. It may be friendlier for beginners who want guided defaults and a smaller feature surface, while OmniWM remains the broader upstream project with multiple layout modes and the full feature set.
 - **[choru-k/OmniWM](https://github.com/choru-k/OmniWM)** is an interesting personal OmniWM fork experimenting with opt-in workflow layers on top of upstream OmniWM, including zone anchors for the Niri strip, a configurable F13-F20 leader-key chord menu, tabbed-column keyboard cycling, and trackpad-friendly modifier resizing. It is best read as a power-user workflow branch rather than a replacement for the main OmniWM release.
+
+## Community
+
+Questions, setup help, and config sharing happen on the [OmniWM Discord](https://discord.gg/NFrJKNmmrT). Confirmed bugs still belong on GitHub — see [Reporting Bugs](#reporting-bugs). Community integrations and related forks are listed above and on the [Community & Support](https://omniwm.app/help/community/) page.
 
 ## Support
 

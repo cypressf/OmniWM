@@ -71,7 +71,7 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     @MainActor
     func testOffDoesNotStartMoveForOptionDrag() throws {
         let fixture = try makeFixture(pid: 1_101)
-        fixture.controller.settings.mouseMoveModifierKey = .off
+        fixture.controller.settings.gestures.mouseMoveModifierKey = .off
         let worldSeq = fixture.controller.workspaceManager.worldSeq
 
         XCTAssertFalse(
@@ -91,7 +91,7 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     @MainActor
     func testConfiguredModifierReplacesOptionAndShiftSelectsInsert() throws {
         let fixture = try makeFixture(pid: 1_102)
-        fixture.controller.settings.mouseMoveModifierKey = .control
+        fixture.controller.settings.gestures.mouseMoveModifierKey = .control
 
         XCTAssertFalse(
             fixture.handler.dispatchMouseDown(
@@ -131,7 +131,7 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
         XCTAssertTrue(fixture.handler.state.isMoving)
         XCTAssertFalse(try XCTUnwrap(fixture.engine.interactiveMove).isInsertMode)
 
-        fixture.controller.settings.mouseMoveModifierKey = .off
+        fixture.controller.settings.gestures.mouseMoveModifierKey = .off
 
         XCTAssertTrue(fixture.handler.state.isMoving)
         XCTAssertNotNil(fixture.engine.interactiveMove)
@@ -145,7 +145,7 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     @MainActor
     func testMouseMoveSettingDoesNotChangeRightMouseResize() throws {
         let fixture = try makeFixture(pid: 1_104)
-        fixture.controller.settings.mouseMoveModifierKey = .off
+        fixture.controller.settings.gestures.mouseMoveModifierKey = .off
         let resizePoint = CGPoint(x: fixture.windowFrame.maxX - 1, y: fixture.windowFrame.midY)
 
         XCTAssertTrue(
@@ -219,6 +219,24 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
                 appliedBorder: border
             )
         )
+    }
+
+    @MainActor
+    func testGlowDoesNotExpandFocusedExteriorBorderResizeZone() throws {
+        let fixture = try makeFixture(pid: 1_109)
+        var config = borderConfig(width: 5)
+        config.glow = BorderGlow(enabled: true, radius: 8, opacity: 0.6)
+        let border = DesiredBorderSurface(token: fixture.token, frame: fixture.windowFrame, config: config)
+        let haloPoint = CGPoint(x: fixture.windowFrame.maxX + 6, y: fixture.windowFrame.midY)
+        XCTAssertTrue(config.resolvedGeometry(for: border.frame, scale: 1).surfaceFrame.contains(haloPoint))
+        XCTAssertNil(fixture.engine.hitTestTiled(point: haloPoint, in: fixture.workspaceId))
+        XCTAssertNil(fixture.handler.focusedBorderResizeToken(
+            at: haloPoint, in: fixture.workspaceId, scale: 1, appliedBorder: border
+        ))
+        XCTAssertEqual(fixture.handler.focusedBorderResizeToken(
+            at: CGPoint(x: fixture.windowFrame.maxX + 4, y: fixture.windowFrame.midY),
+            in: fixture.workspaceId, scale: 1, appliedBorder: border
+        ), fixture.token)
     }
 
     @MainActor
@@ -324,9 +342,9 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     @MainActor
     private func makeDwindleFixture(pid: pid_t) throws -> DwindleFixture {
         let controller = makeController()
-        controller.settings.mouseMoveModifierKey = .control
+        controller.settings.gestures.mouseMoveModifierKey = .control
         let monitor = makeMonitor()
-        controller.settings.workspaceConfigurations = [
+        controller.settings.workspaces.configurations = [
             WorkspaceConfiguration(
                 name: "1",
                 monitorAssignment: .specificDisplay(OutputId(from: monitor)),
@@ -360,11 +378,11 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
         let secondFrame = try XCTUnwrap(engine.presentedFrame(for: tokens[1], in: workspaceId, at: 0))
         XCTAssertNotEqual(firstFrame, secondFrame)
         XCTAssertTrue(controller.isEnabled)
-        XCTAssertEqual(controller.settings.layoutType(for: "1"), .dwindle)
+        XCTAssertEqual(controller.settings.workspaces.layoutType(for: "1"), .dwindle)
         XCTAssertEqual(
             MouseEventHandler.mouseMoveMode(
                 modifiers: .maskControl,
-                required: controller.settings.mouseMoveModifierKey.cgEventFlags
+                required: controller.settings.gestures.mouseMoveModifierKey.cgEventFlags
             ),
             .swap
         )

@@ -13,7 +13,7 @@ final class MultitouchLifecycleTests: XCTestCase {
     private let deviceB = FakeMultitouchBackend.device(pointer: 0xB1, registryId: 202)
 
     func testProductionTopologyCriteriaUsesDigitizerDeviceUsages() throws {
-        let criteria = MultitouchGestureSource.topologyCriteria
+        let criteria = MultitouchTopologyMonitor.topologyCriteria
         XCTAssertEqual(criteria.count, 1)
         let criterion = try XCTUnwrap(criteria.first)
         XCTAssertNil(criterion.primaryUsage)
@@ -539,6 +539,48 @@ final class MultitouchLifecycleTests: XCTestCase {
         await drainMultitouchTasks()
     }
 
+    func testSuppliedDrainLocationDoesNotCountCursorSample() async {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA])])
+        harness.source.startLifecycle()
+        await runNext(harness)
+        harness.source.beginPerformanceCapture()
+        var locations: [CGPoint] = []
+        harness.source.onSnapshot = { locations.append($0.location) }
+        harness.backend.emitFrame(registryId: 101, touches: [(0.4, 0.5)], timestamp: 1)
+        harness.backend.emitFrame(registryId: 101, touches: [(0.5, 0.5)], timestamp: 1.01)
+        harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 1.02)
+
+        let location = CGPoint(x: 200, y: 300)
+        harness.source.drainRawFrameMailbox(location: location)
+
+        XCTAssertEqual(locations, [location, location, location])
+        XCTAssertEqual(harness.source.performanceSnapshot()?.drainBatches, 1)
+        XCTAssertEqual(harness.source.performanceSnapshot()?.cursorSamples, 0)
+        await drainMultitouchTasks()
+        XCTAssertEqual(harness.source.endPerformanceCapture()?.cursorSamples, 0)
+        await shutdown(harness)
+    }
+
+    func testDrainSamplesCursorOncePerNonemptyBatch() async {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA])])
+        harness.source.startLifecycle()
+        await runNext(harness)
+        harness.source.beginPerformanceCapture()
+        harness.source.drainRawFrameMailbox()
+        XCTAssertEqual(harness.source.performanceSnapshot()?.cursorSamples, 0)
+        harness.backend.emitFrame(registryId: 101, touches: [(0.4, 0.5)], timestamp: 1)
+        harness.backend.emitFrame(registryId: 101, touches: [(0.5, 0.5)], timestamp: 1.01)
+        harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 1.02)
+
+        harness.source.drainRawFrameMailbox()
+
+        XCTAssertEqual(harness.source.performanceSnapshot()?.drainBatches, 1)
+        XCTAssertEqual(harness.source.performanceSnapshot()?.cursorSamples, 1)
+        await drainMultitouchTasks()
+        XCTAssertEqual(harness.source.endPerformanceCapture()?.cursorSamples, 1)
+        await shutdown(harness)
+    }
+
     func testPerformanceCountersSurviveSourceReplacement() async throws {
         let old = makeHarness([FakeMultitouchBackend.enumeration([deviceA])])
         let replacement = makeHarness([FakeMultitouchBackend.enumeration([deviceB])])
@@ -572,8 +614,8 @@ final class MultitouchLifecycleTests: XCTestCase {
     func testPerformanceCountersSurviveSourceDisable() async throws {
         let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA])])
         let controller = WindowAdmissionTestSupport.controller(prefix: "MultitouchMetricsDisable")
-        controller.settings.scrollGestureEnabled = true
-        controller.settings.workspaceSwipeEnabled = false
+        controller.settings.gestures.scrollEnabled = true
+        controller.settings.gestures.workspaceSwipeEnabled = false
         controller.hasStartedServices = true
         let handler = controller.mouseEventHandler
 
@@ -583,7 +625,7 @@ final class MultitouchLifecycleTests: XCTestCase {
         harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 1)
         harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 2)
 
-        controller.settings.scrollGestureEnabled = false
+        controller.settings.gestures.scrollEnabled = false
         handler.reconcileMultitouchSource()
 
         let liveSnapshot = try XCTUnwrap(handler.performanceSnapshot()?.multitouch)
@@ -608,8 +650,8 @@ final class MultitouchLifecycleTests: XCTestCase {
             FakeMultitouchBackend.enumeration([deviceA])
         ])
         let controller = WindowAdmissionTestSupport.controller(prefix: "MultitouchDisableRecovery")
-        controller.settings.scrollGestureEnabled = true
-        controller.settings.workspaceSwipeEnabled = false
+        controller.settings.gestures.scrollEnabled = true
+        controller.settings.gestures.workspaceSwipeEnabled = false
         controller.hasStartedServices = true
         let handler = controller.mouseEventHandler
         var replacementCreations = 0
@@ -622,14 +664,14 @@ final class MultitouchLifecycleTests: XCTestCase {
         await runNext(harness)
         harness.backend.stopResults[101] = [-1, KERN_SUCCESS]
 
-        controller.settings.scrollGestureEnabled = false
+        controller.settings.gestures.scrollEnabled = false
         handler.reconcileMultitouchSource()
 
         XCTAssertEqual(handler.multitouchDiagnosticsSnapshot?.state, .stopped)
         XCTAssertEqual(handler.multitouchDiagnosticsSnapshot?.lastStop, .status(-1))
         XCTAssertTrue(MultitouchGestureSource.shared === harness.source)
 
-        controller.settings.scrollGestureEnabled = true
+        controller.settings.gestures.scrollEnabled = true
         handler.reconcileMultitouchSource()
         await runNext(harness)
 

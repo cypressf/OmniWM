@@ -7,8 +7,6 @@ import Foundation
 private let niriWheelScrollTickAmount: CGFloat = 120.0
 
 struct MouseInputState {
-    /// Who started the active move or resize. A trackpad gesture rejects every mouse button, so mouse drags
-    /// and releases cannot steer or finish an interaction they did not begin.
     enum InteractionSource: Hashable {
         case mouse(MouseEventHandler.MouseButton)
         case trackpadGesture
@@ -25,11 +23,10 @@ struct MouseInputState {
         let columnScrollCandidate: Bool
         let columnScrollAxis: WorkspaceSwipeAxis
         let workspaceAxis: WorkspaceSwipeAxis?
-        /// The tiled window under the cursor when the gesture began, when a window move or resize gesture
-        /// could target it. `nil` means no window gesture candidate.
+        let overviewAction: OverviewGestureAction?
         let windowGestureTarget: WindowToken?
-        /// Cursor location when the gesture began; window gestures steer a virtual cursor from here.
         let startLocation: CGPoint
+        var contactSession: MultitouchContactSession?
     }
 
     enum GesturePhase {
@@ -73,6 +70,10 @@ struct MouseInputState {
         set { activeInteractionSource = newValue.map { .mouse($0) } }
     }
 
+    var gestureOwnsWindowInteraction: Bool {
+        activeInteractionSource == .trackpadGesture
+    }
+
     var capturedInteractionButton: MouseEventHandler.MouseButton?
     var resizeLayout: LayoutType?
     var moveLayout: LayoutType?
@@ -93,15 +94,11 @@ struct MouseInputState {
     var gestureLastAverageY: CGFloat = 0.0
     var lockedGestureContext: LockedGestureContext?
     var activeGestureMode: TrackpadGestureMode?
-    var gestureOwnsWindowInteraction: Bool {
-        activeInteractionSource == .trackpadGesture
-    }
-
     /// When the contact frame first disagreed with the locked finger count during an armed or committed
     /// window gesture.
     var gestureFingerCountMismatchSince: TimeInterval?
     /// When the current touch began (first frame with any contact after an empty one). Gestures may only
-    /// arm within `trackpadGestureArmWindow` of this moment.
+    /// arm within `MouseEventHandler.trackpadGestureArmWindow` of this moment.
     var gestureTouchDownTimestamp: TimeInterval?
     var viewportGestureSessionID: AnimationDriver.GestureSessionID?
     var workspaceSwipeFired = false
@@ -109,6 +106,8 @@ struct MouseInputState {
     var suppressGestureStartUntilAllTouchesLift = false
     var consumeTrackpadScrollUntilAllTouchesLift = false
     var suppressTrackpadMomentumScroll = false
+    var contactSessions = MultitouchContactSessions()
+    var consumedTrackpadSessions: [UInt64: MultitouchContactSession] = [:]
     var horizontalWheelTracker = NiriScrollTracker(tick: niriWheelScrollTickAmount)
     var verticalWheelTracker = NiriScrollTracker(tick: niriWheelScrollTickAmount)
 }

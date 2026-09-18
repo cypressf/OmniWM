@@ -263,6 +263,74 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         }
     }
 
+    func testIndexedWindowMoveHonorsFollowSettingAfterLayoutVisibility() throws {
+        for layout in [LayoutType.niri, .dwindle] {
+            for followsFocus in [false, true] {
+                let fixture = try makeFixture(layouts: [layout, layout], followsFocus: followsFocus)
+                let controller = fixture.controller
+                let manager = controller.workspaceManager
+                let refreshController = controller.layoutRefreshController
+                let sourceWorkspaceId = fixture.workspaceIds[0]
+                let destinationWorkspaceId = fixture.workspaceIds[1]
+                let fallback = try addManagedWindow(
+                    pid: 488_014,
+                    windowId: 488_141,
+                    to: sourceWorkspaceId,
+                    fixture: fixture
+                )
+                let moved = try addManagedWindow(
+                    pid: 488_014,
+                    windowId: 488_142,
+                    to: sourceWorkspaceId,
+                    fixture: fixture
+                )
+                try select(moved, in: sourceWorkspaceId, fixture: fixture)
+                refreshController.fastFrameProvider = { _, _ in
+                    CGRect(x: 100, y: 100, width: 600, height: 500)
+                }
+
+                try withBlockedLayoutRefreshes(fixture) {
+                    controller.workspaceNavigationHandler.moveFocusedWindow(toWorkspaceIndex: 1)
+
+                    let pending = try XCTUnwrap(refreshController.layoutState.pendingRefresh)
+                    XCTAssertEqual(pending.postLayoutActions.count, 1)
+                    XCTAssertTrue(fixture.focusRecorder.focusedTokens.isEmpty)
+                    var plan = refreshController.buildRelayoutEffectPlan(
+                        useScrollAnimationPath: false,
+                        recoverFocus: false,
+                        affectedWorkspaceIds: pending.affectedWorkspaceIds
+                    )
+                    plan.postLayoutActions = pending.postLayoutActions
+                    let completionContext = "\(layout), followsFocus=\(followsFocus)"
+                    XCTAssertTrue(
+                        pending.postLayoutActions.first?.isCurrent(using: manager) == true,
+                        completionContext
+                    )
+                    refreshController.applyEffectPlan(plan, controller: controller)
+
+                    let expectedFocusToken = followsFocus ? moved.id : fallback.id
+                    let parkedToken = followsFocus ? fallback.id : moved.id
+                    XCTAssertEqual(manager.workspace(for: moved.id), destinationWorkspaceId)
+                    XCTAssertEqual(manager.workspace(for: fallback.id), sourceWorkspaceId)
+                    XCTAssertEqual(
+                        manager.activeWorkspace(on: fixture.monitor.id)?.id,
+                        followsFocus ? destinationWorkspaceId : sourceWorkspaceId
+                    )
+                    XCTAssertEqual(manager.interactionMonitorId, fixture.monitor.id)
+                    XCTAssertEqual(manager.hiddenState(for: parkedToken)?.workspaceInactive, true)
+                    XCTAssertNil(manager.hiddenState(for: expectedFocusToken))
+                    XCTAssertEqual(fixture.focusRecorder.focusedTokens, [expectedFocusToken], completionContext)
+                    XCTAssertEqual(manager.pendingFocusedToken, expectedFocusToken, completionContext)
+                    XCTAssertEqual(
+                        controller.intentLedger.activeManagedRequest?.token,
+                        expectedFocusToken,
+                        completionContext
+                    )
+                }
+            }
+        }
+    }
+
     func testInvalidatedIndexedWindowMoveRecoversRemainingSourceWindow() throws {
         let fixture = try makeFixture(layouts: [.niri, .niri], followsFocus: false)
         let sourceWorkspaceId = fixture.workspaceIds[0]
@@ -456,9 +524,9 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
                     controller: fixture.controller,
                     affectedWorkspaceId: fixture.sourceWorkspaceId
                 ) {
-                    XCTAssertFalse(fixture.controller.settings.moveCrossesMonitorAtEdge)
+                    XCTAssertFalse(fixture.controller.settings.focus.moveCrossesMonitorAtEdge)
                     XCTAssertEqual(
-                        fixture.controller.commandHandler.performCommand(.moveWindowToMonitor(.right)),
+                        fixture.controller.commandHandler.performCommand(.workspace(.moveToMonitor(.right))),
                         .executed
                     )
 
@@ -513,7 +581,7 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         let noFocusWorldSeq = manager.worldSeq
         XCTAssertNil(manager.selectedManagedToken)
         XCTAssertEqual(
-            controller.commandHandler.performCommand(.moveWindowToMonitor(.right)),
+            controller.commandHandler.performCommand(.workspace(.moveToMonitor(.right))),
             .executed
         )
         XCTAssertEqual(manager.worldSeq, noFocusWorldSeq)
@@ -537,7 +605,7 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         let noAdjacentWorldSeq = manager.worldSeq
 
         XCTAssertEqual(
-            controller.commandHandler.performCommand(.moveWindowToMonitor(.left)),
+            controller.commandHandler.performCommand(.workspace(.moveToMonitor(.left))),
             .executed
         )
         XCTAssertEqual(manager.workspace(for: window.id), fixture.sourceWorkspaceId)
@@ -587,10 +655,10 @@ extension WorkspaceMoveFocusBehaviorTests {
             autosaveEnabled: false
         )
         settings.animationsEnabled = false
-        settings.focusFollowsWindowToMonitor = followsFocus
-        settings.moveCrossesMonitorAtEdge = false
-        settings.defaultLayoutType = layout
-        settings.workspaceConfigurations = [
+        settings.focus.followsWindowToMonitor = followsFocus
+        settings.focus.moveCrossesMonitorAtEdge = false
+        settings.workspaces.defaultLayoutType = layout
+        settings.workspaces.configurations = [
             WorkspaceConfiguration(
                 name: "1",
                 monitorAssignment: .specificDisplay(OutputId(from: sourceMonitor)),
@@ -732,9 +800,9 @@ extension WorkspaceMoveFocusBehaviorTests {
             autosaveEnabled: false
         )
         settings.animationsEnabled = false
-        settings.focusFollowsWindowToMonitor = followsFocus
-        settings.defaultLayoutType = layouts.first ?? .niri
-        settings.workspaceConfigurations = layouts.enumerated().map { index, layout in
+        settings.focus.followsWindowToMonitor = followsFocus
+        settings.workspaces.defaultLayoutType = layouts.first ?? .niri
+        settings.workspaces.configurations = layouts.enumerated().map { index, layout in
             WorkspaceConfiguration(
                 name: String(index + 1),
                 monitorAssignment: .main,

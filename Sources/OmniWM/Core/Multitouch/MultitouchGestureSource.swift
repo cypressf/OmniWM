@@ -8,572 +8,30 @@ import IOKit
 import os
 import Synchronization
 
-private let multitouchTouchStride = 96
-private let multitouchStateByteOffset = 20
-private let multitouchPositionXByteOffset = 32
-private let multitouchPositionYByteOffset = 36
-private let multitouchSizeByteOffset = 48
-private let multitouchMajorAxisByteOffset = 60
-private let multitouchMinorAxisByteOffset = 64
-private let multitouchTouchingState: Int32 = 4
-private let multitouchLiftTimeout = 0.12
-
-final class MultitouchFrameMailbox: @unchecked Sendable {
-    struct PerformanceSnapshot: Equatable, Sendable {
-        let rawCallbacks: UInt64
-        let staleCallbacks: UInt64
-        let drainBatches: UInt64
-        let overwrittenChanges: UInt64
-        let transitionsQueued: UInt64
-        let cursorSamples: UInt64
-        let pendingFrames: Int
-        let maximumPendingFrames: Int
-    }
-
-    private final class PerformanceCounters: @unchecked Sendable {
-        let rawCallbacks = Atomic<UInt64>(0)
-        let staleCallbacks = Atomic<UInt64>(0)
-        let drainBatches = Atomic<UInt64>(0)
-        let overwrittenChanges = Atomic<UInt64>(0)
-        let transitionsQueued = Atomic<UInt64>(0)
-        let cursorSamples = Atomic<UInt64>(0)
-        var maximumPendingFrames: Int
-
-        init(maximumPendingFrames: Int) {
-            self.maximumPendingFrames = maximumPendingFrames
-        }
-
-        func snapshot(pendingFrames: Int) -> PerformanceSnapshot {
-            PerformanceSnapshot(
-                rawCallbacks: rawCallbacks.load(ordering: .relaxed),
-                staleCallbacks: staleCallbacks.load(ordering: .relaxed),
-                drainBatches: drainBatches.load(ordering: .relaxed),
-                overwrittenChanges: overwrittenChanges.load(ordering: .relaxed),
-                transitionsQueued: transitionsQueued.load(ordering: .relaxed),
-                cursorSamples: cursorSamples.load(ordering: .relaxed),
-                pendingFrames: pendingFrames,
-                maximumPendingFrames: maximumPendingFrames
-            )
-        }
-    }
-
-    enum Kind: Equatable, Sendable {
-        case began
-        case changed
-        case ended
-        case cancelled
-
-        var isTerminal: Bool {
-            self == .ended || self == .cancelled
-        }
-    }
-
-    struct Delivery: Sendable {
-        let frame: MultitouchGestureSource.RawFrame
-        let generation: UInt
-        let kind: Kind
-    }
-
-    private struct State {
-        var generation: UInt = 0
-        var touchingSlots: UInt64 = 0
-        var ownerSlot: Int?
-        var ownerTimestamp: Double = 0
-        var drainScheduled = false
-        var pending: [Delivery] = []
-        var spare: [Delivery] = []
-        var performanceCounters: PerformanceCounters?
-    }
-
-    let capacity: Int
-    private let state = OSAllocatedUnfairLock(initialState: State())
-
-    init(capacity: Int = 8) {
-        self.capacity = max(3, capacity)
-    }
-
-    func activate(generation: UInt) {
-        state.withLock { value in
-            value.generation = generation
-            value.touchingSlots = 0
-            value.ownerSlot = nil
-            value.drainScheduled = false
-            value.pending.removeAll(keepingCapacity: true)
-        }
-    }
-
-    func invalidate() {
-        activate(generation: 0)
-    }
-
-    func offer(_ frame: MultitouchGestureSource.RawFrame, generation: UInt, slot: Int) -> Bool {
-        state.withLock { value in
-            if let counters = value.performanceCounters {
-                _ = counters.rawCallbacks.wrappingAdd(1, ordering: .relaxed)
-            }
-            guard generation != 0, generation == value.generation else {
-                if let counters = value.performanceCounters {
-                    _ = counters.staleCallbacks.wrappingAdd(1, ordering: .relaxed)
-                }
-                return false
-            }
-            let hasTouches = !frame.touches.isEmpty
-            var scheduled = false
-            if let owner = value.ownerSlot, hasTouches,
-               frame.timestamp - value.ownerTimestamp > multitouchLiftTimeout
-            {
-                value.touchingSlots &= ~(1 << UInt64(owner))
-                value.ownerSlot = nil
-                scheduled = enqueue(
-                    .cancelled,
-                    MultitouchGestureSource.RawFrame(
-                        touches: MultitouchGestureSource.RawTouchBuffer(),
-                        timestamp: frame.timestamp
-                    ),
-                    generation: generation,
-                    in: &value
-                )
-            }
-            return route(frame, hasTouches: hasTouches, generation: generation, slot: slot, in: &value) || scheduled
-        }
-    }
-
-    private func route(
-        _ frame: MultitouchGestureSource.RawFrame,
-        hasTouches: Bool,
-        generation: UInt,
-        slot: Int,
-        in value: inout State
-    ) -> Bool {
-        let slotMask: UInt64 = 1 << UInt64(slot)
-        let wasTouching = value.touchingSlots & slotMask != 0
-        if hasTouches {
-            value.touchingSlots |= slotMask
-        } else {
-            value.touchingSlots &= ~slotMask
-        }
-        guard let owner = value.ownerSlot else {
-            guard hasTouches, !wasTouching else { return false }
-            value.ownerSlot = slot
-            value.ownerTimestamp = frame.timestamp
-            makeRoomForGesture(in: &value)
-            return enqueue(.began, frame, generation: generation, in: &value)
-        }
-        guard owner == slot else { return false }
-        guard hasTouches else {
-            value.ownerSlot = nil
-            return enqueue(.ended, frame, generation: generation, in: &value)
-        }
-        value.ownerTimestamp = frame.timestamp
-        if value.pending.last?.kind == .changed {
-            value.pending[value.pending.count - 1] = Delivery(
-                frame: frame,
-                generation: generation,
-                kind: .changed
-            )
-            if let counters = value.performanceCounters {
-                _ = counters.overwrittenChanges.wrappingAdd(1, ordering: .relaxed)
-            }
-            return scheduleDrainIfNeeded(in: &value)
-        }
-        return enqueue(.changed, frame, generation: generation, in: &value)
-    }
-
-    private func enqueue(
-        _ kind: Kind,
-        _ frame: MultitouchGestureSource.RawFrame,
-        generation: UInt,
-        in value: inout State
-    ) -> Bool {
-        if value.pending.count == capacity,
-           let changedIndex = value.pending.firstIndex(where: { $0.kind == .changed })
-        {
-            value.pending.remove(at: changedIndex)
-        }
-        if kind.isTerminal {
-            makeRoomForEnd(in: &value)
-        }
-        guard value.pending.count < capacity else { return scheduleDrainIfNeeded(in: &value) }
-        value.pending.append(Delivery(frame: frame, generation: generation, kind: kind))
-        if let counters = value.performanceCounters {
-            if kind != .changed {
-                _ = counters.transitionsQueued.wrappingAdd(1, ordering: .relaxed)
-            }
-            counters.maximumPendingFrames = max(counters.maximumPendingFrames, value.pending.count)
-        }
-        return scheduleDrainIfNeeded(in: &value)
-    }
-
-    func take() -> [Delivery] {
-        state.withLock { value in
-            var deliveries: [Delivery] = []
-            swap(&deliveries, &value.spare)
-            deliveries.removeAll(keepingCapacity: true)
-            swap(&deliveries, &value.pending)
-            value.drainScheduled = false
-            if let counters = value.performanceCounters, !deliveries.isEmpty {
-                _ = counters.drainBatches.wrappingAdd(1, ordering: .relaxed)
-                _ = counters.cursorSamples.wrappingAdd(1, ordering: .relaxed)
-            }
-            return deliveries
-        }
-    }
-
-    func recycle(_ deliveries: [Delivery]) {
-        let recycled = deliveries
-        state.withLock { value in
-            if recycled.capacity > value.spare.capacity {
-                value.spare = recycled
-            }
-        }
-    }
-
-    var pendingCount: Int {
-        state.withLock { $0.pending.count }
-    }
-
-    func beginPerformanceCapture() {
-        state.withLock { value in
-            value.performanceCounters = PerformanceCounters(
-                maximumPendingFrames: value.pending.count
-            )
-        }
-    }
-
-    func performanceSnapshot() -> PerformanceSnapshot? {
-        state.withLock { value in
-            value.performanceCounters?.snapshot(pendingFrames: value.pending.count)
-        }
-    }
-
-    func endPerformanceCapture() -> PerformanceSnapshot? {
-        state.withLock { value in
-            let snapshot = value.performanceCounters?.snapshot(pendingFrames: value.pending.count)
-            value.performanceCounters = nil
-            return snapshot
-        }
-    }
-
-    private func scheduleDrainIfNeeded(in value: inout State) -> Bool {
-        guard !value.drainScheduled, !value.pending.isEmpty else { return false }
-        value.drainScheduled = true
-        return true
-    }
-
-    private func makeRoomForGesture(in value: inout State) {
-        while value.pending.count > capacity - 3 {
-            guard let endIndex = value.pending.firstIndex(where: { $0.kind.isTerminal }) else {
-                value.pending.removeAll(keepingCapacity: true)
-                return
-            }
-            value.pending.removeFirst(endIndex + 1)
-        }
-    }
-
-    private func makeRoomForEnd(in value: inout State) {
-        while value.pending.count >= capacity,
-              let endIndex = value.pending.firstIndex(where: { $0.kind.isTerminal })
-        {
-            value.pending.removeFirst(endIndex + 1)
-        }
-    }
-}
-
 @MainActor
 final class MultitouchGestureSource {
-    struct RawTouch: Sendable {
-        let x: Float
-        let y: Float
-        /// Contact ellipse axes and total pressure as reported by the sensor; 0 when the frame carries none.
-        var majorAxis: Float = 0
-        var minorAxis: Float = 0
-        var size: Float = 0
-    }
-
-    struct RawTouchBuffer: RandomAccessCollection, Sendable {
-        private var inline = InlineArray<16, RawTouch>(repeating: RawTouch(x: 0, y: 0))
-        private var overflow: [RawTouch] = []
-        private(set) var count = 0
-
-        var startIndex: Int {
-            0
-        }
-
-        var endIndex: Int {
-            count
-        }
-
-        init() {}
-
-        init(_ touches: [RawTouch]) {
-            for touch in touches {
-                append(touch)
-            }
-        }
-
-        mutating func append(_ touch: RawTouch) {
-            if count < inline.count {
-                inline[count] = touch
-            } else {
-                overflow.append(touch)
-            }
-            count += 1
-        }
-
-        subscript(index: Int) -> RawTouch {
-            index < inline.count ? inline[index] : overflow[index - inline.count]
-        }
-    }
-
-    struct RawFrame: Sendable {
-        let touches: RawTouchBuffer
-        let timestamp: Double
-        /// Touching contacts the decoder dropped as palms, and the widest major axis among them.
-        let rejectedPalmCount: Int
-        let rejectedPalmMajorAxis: Float
-
-        init(touches: [RawTouch], timestamp: Double, rejectedPalmCount: Int = 0, rejectedPalmMajorAxis: Float = 0) {
-            self.touches = RawTouchBuffer(touches)
-            self.timestamp = timestamp
-            self.rejectedPalmCount = rejectedPalmCount
-            self.rejectedPalmMajorAxis = rejectedPalmMajorAxis
-        }
-
-        init(
-            touches: consuming RawTouchBuffer,
-            timestamp: Double,
-            rejectedPalmCount: Int = 0,
-            rejectedPalmMajorAxis: Float = 0
-        ) {
-            self.touches = consume touches
-            self.timestamp = timestamp
-            self.rejectedPalmCount = rejectedPalmCount
-            self.rejectedPalmMajorAxis = rejectedPalmMajorAxis
-        }
-    }
-
-    /// Contacts whose ellipse major axis exceeds this are palms, not fingertips. Fingertips on Apple
-    /// trackpads report a major axis of roughly 6-12; the heel of a palm or the side of a thumb reports
-    /// 20 and up. Contacts that carry no size data (0) are always accepted. Tune against the
-    /// "multitouch:" lines of the mouse trace, which list every contact's axes whenever the count changes.
-    nonisolated static let palmMajorAxisThreshold: Float = 20
-
-    nonisolated static func isPalm(majorAxis: Float) -> Bool {
-        majorAxis.isFinite && majorAxis > palmMajorAxisThreshold
-    }
-
-    struct RegistrationToken: Equatable, Sendable {
-        static let slotCapacity = 64
-        private static let slotBits: UInt = 6
-
-        let generation: UInt
-        let slot: Int
-
-        init(generation: UInt, slot: Int) {
-            self.generation = generation
-            self.slot = slot
-        }
-
-        init(bitPattern: UInt) {
-            generation = bitPattern >> Self.slotBits
-            slot = Int(bitPattern & UInt(Self.slotCapacity - 1))
-        }
-
-        var refcon: UnsafeMutableRawPointer? {
-            UnsafeMutableRawPointer(bitPattern: generation << Self.slotBits | UInt(slot))
-        }
-    }
-
-    enum LifecycleState: String, Sendable {
-        case stopped
-        case suspended
-        case waiting
-        case enumerating
-        case running
-        case retrying
-        case exhausted
-        case unavailable
-    }
-
-    enum RevalidationReason: String, CaseIterable, Hashable, Sendable {
-        case startup
-        case wake
-        case unlock
-        case arrival
-        case removal
-        case observerRecovery
-    }
-
-    enum TopologySignal: String, Sendable {
-        case arrival
-        case removal
-    }
-
-    enum TopologyObserverState: Equatable, Sendable {
-        case stopped
-        case monitoring
-        case retrying(Int)
-        case exhausted
-    }
-
-    enum OperationResult: Equatable, Sendable {
-        case notAttempted
-        case success
-        case alreadyStopped(Int32)
-        case alreadyUnregistered
-        case status(Int32)
-        case rejected
-    }
-
-    struct DiagnosticsSnapshot: Sendable {
-        let state: LifecycleState
-        let activeGeneration: UInt?
-        let registeredDeviceCount: Int
-        let lastEnumeration: MultitouchBinding.EnumerationOutcome?
-        let lastRegister: OperationResult
-        let lastStart: OperationResult
-        let lastRunningCheck: OperationResult
-        let lastStop: OperationResult
-        let lastUnregister: OperationResult
-        let retryReasons: [RevalidationReason]
-        let retryEpisode: UInt64
-        let retryAttempt: Int
-        let maximumAttempts: Int
-        let nextRetryDelay: Duration?
-        let retryExhausted: Bool
-        let topologyObserverState: TopologyObserverState
-        let lastTopologySignal: TopologySignal?
-        let lastRawCallbackTimestamp: Double?
-        let lastRawCallbackGeneration: UInt?
-        let lastAcceptedCallbackTimestamp: Double?
-        let lastAcceptedCallbackGeneration: UInt?
-
-        func formatted() -> String {
-            [
-                "state=\(state.rawValue)",
-                "activeGeneration=\(String(describing: activeGeneration))",
-                "registeredDevices=\(registeredDeviceCount)",
-                "lastEnumeration=\(String(describing: lastEnumeration))",
-                "lastRegister=\(String(describing: lastRegister))",
-                "lastStart=\(String(describing: lastStart))",
-                "lastRunningCheck=\(String(describing: lastRunningCheck))",
-                "lastStop=\(String(describing: lastStop))",
-                "lastUnregister=\(String(describing: lastUnregister))",
-                "retryReasons=\(retryReasons.map(\.rawValue).joined(separator: ","))",
-                "retryEpisode=\(retryEpisode)",
-                "retryAttempt=\(retryAttempt)/\(maximumAttempts)",
-                "nextRetryDelay=\(String(describing: nextRetryDelay))",
-                "retryExhausted=\(retryExhausted)",
-                "topologyObserver=\(String(describing: topologyObserverState))",
-                "lastTopologySignal=\(String(describing: lastTopologySignal?.rawValue))",
-                "lastRawCallbackTimestamp=\(String(describing: lastRawCallbackTimestamp))",
-                "lastRawCallbackGeneration=\(String(describing: lastRawCallbackGeneration))",
-                "lastAcceptedCallbackTimestamp=\(String(describing: lastAcceptedCallbackTimestamp))",
-                "lastAcceptedCallbackGeneration=\(String(describing: lastAcceptedCallbackGeneration))"
-            ].joined(separator: "\n")
-        }
-    }
-
-    struct LifecycleOperations {
-        let enumerate: () -> MultitouchBinding.Enumeration
-        let register: (
-            MultitouchBinding.DeviceRef,
-            MultitouchBinding.ContactCallback,
-            UnsafeMutableRawPointer
-        ) -> Bool
-        let start: (MultitouchBinding.DeviceRef) -> Int32
-        let isRunning: (MultitouchBinding.DeviceRef) -> Bool
-        let stop: (MultitouchBinding.DeviceRef) -> Int32
-        let unregister: (MultitouchBinding.DeviceRef, MultitouchBinding.ContactCallback) -> Bool
-        let sleep: @MainActor (Duration) async throws -> Void
-
-        init(
-            enumerate: @escaping () -> MultitouchBinding.Enumeration,
-            register: @escaping (
-                MultitouchBinding.DeviceRef,
-                MultitouchBinding.ContactCallback,
-                UnsafeMutableRawPointer
-            ) -> Bool,
-            start: @escaping (MultitouchBinding.DeviceRef) -> Int32,
-            isRunning: @escaping (MultitouchBinding.DeviceRef) -> Bool,
-            stop: @escaping (MultitouchBinding.DeviceRef) -> Int32,
-            unregister: @escaping (MultitouchBinding.DeviceRef, MultitouchBinding.ContactCallback) -> Bool,
-            sleep: @escaping @MainActor (Duration) async throws -> Void
-        ) {
-            self.enumerate = enumerate
-            self.register = register
-            self.start = start
-            self.isRunning = isRunning
-            self.stop = stop
-            self.unregister = unregister
-            self.sleep = sleep
-        }
-
-        init(binding: MultitouchBinding) {
-            enumerate = { binding.enumerateDevices() }
-            register = { binding.register($0, callback: $1, refcon: $2) }
-            start = { binding.start($0) }
-            isRunning = { binding.isRunning($0) }
-            stop = { binding.stop($0) }
-            unregister = { binding.unregister($0, callback: $1) }
-            sleep = { try await Task.sleep(for: $0) }
-        }
-    }
-
-    struct TopologyMonitoringOperations {
-        typealias Notifications = AsyncThrowingStream<TopologySignal, any Error>
-
-        let notifications: @MainActor () async -> Notifications
-        let sleep: @MainActor (Duration) async throws -> Void
-    }
-
-    private struct Registration {
-        let device: MultitouchBinding.Device
-        var startAttempted: Bool
-        var registered: Bool
-    }
-
     private enum EpisodeReplacementState {
         case notRequested
         case pending
         case completed
     }
 
-    private final class WeakSharedRoute: @unchecked Sendable {
-        weak var source: MultitouchGestureSource?
-    }
-
-    private nonisolated static let sharedRoute = OSAllocatedUnfairLock(initialState: WeakSharedRoute())
-
-    nonisolated static var shared: MultitouchGestureSource? {
-        get { sharedRoute.withLock { $0.source } }
-        set { sharedRoute.withLock { $0.source = newValue } }
-    }
-
     var onSnapshot: ((MouseEventHandler.GestureEventSnapshot) -> Void)?
     var onSourceWillReplace: (() -> Void)?
+    var onContactSessions: ((MultitouchContactSessions) -> Void)?
 
     private static var nextRegistrationGeneration: UInt = 0
-    static let topologyCriteria = [
-        HIDDeviceManager.DeviceMatchingCriteria(deviceUsages: [
-            .digitizers(.touchPad),
-            .digitizers(.multiplePointDigitizer)
-        ])
-    ]
-
     private let operations: LifecycleOperations?
-    private let topologyMonitoringOperations: TopologyMonitoringOperations?
+    private let topologyMonitor: MultitouchTopologyMonitor
     private let coalescingDelay: Duration
     private let wakeSettlingDelay: Duration
     private let retryDelays: [Duration]
     private nonisolated let rawFrameMailbox = MultitouchFrameMailbox()
 
-    private var registrations: [Registration] = []
-    private var deviceList: CFArray?
+    private let devices: MultitouchDeviceRegistration
     private var activeGeneration: UInt = 0
     private var previousActiveCount = 0
     private var previousRejectedPalmCount = 0
-    private var topologyTask: Task<Void, Never>?
     private var revalidationTask: Task<Void, Never>?
     private var episodeActive = false
     private var episodeReasons: Set<RevalidationReason> = []
@@ -587,25 +45,20 @@ final class MultitouchGestureSource {
     private var revalidationSchedule: UInt64 = 0
 
     private var state: LifecycleState = .stopped
-    private var topologyObserverState: TopologyObserverState = .stopped
     private var lastTopologySignal: TopologySignal?
     private var lastEnumeration: MultitouchBinding.EnumerationOutcome?
-    private var lastRegister: OperationResult = .notAttempted
-    private var lastStart: OperationResult = .notAttempted
-    private var lastRunningCheck: OperationResult = .notAttempted
-    private var lastStop: OperationResult = .notAttempted
-    private var lastUnregister: OperationResult = .notAttempted
     private var lastRawCallbackTimestamp: Double?
     private var lastRawCallbackGeneration: UInt?
     private var lastAcceptedCallbackTimestamp: Double?
     private var lastAcceptedCallbackGeneration: UInt?
 
     init() {
-        operations = MultitouchBinding().map(LifecycleOperations.init(binding:))
-        topologyMonitoringOperations = Self.liveTopologyMonitoringOperations
+        let operations = MultitouchBinding().map(LifecycleOperations.init(binding:))
+        self.operations = operations
+        devices = MultitouchDeviceRegistration(operations: operations, callback: Self.contactCallback)
         coalescingDelay = .milliseconds(100)
         wakeSettlingDelay = .seconds(1)
-        retryDelays = [
+        let retryDelays: [Duration] = [
             .milliseconds(250),
             .milliseconds(500),
             .seconds(1),
@@ -613,6 +66,11 @@ final class MultitouchGestureSource {
             .seconds(4),
             .seconds(8)
         ]
+        self.retryDelays = retryDelays
+        topologyMonitor = MultitouchTopologyMonitor(
+            operations: MultitouchTopologyMonitor.liveOperations,
+            retryDelays: retryDelays
+        )
     }
 
     init(
@@ -631,16 +89,19 @@ final class MultitouchGestureSource {
         ]
     ) {
         self.operations = operations
-        self.topologyMonitoringOperations = topologyMonitoringEnabled
-            ? topologyMonitoringOperations ?? Self.liveTopologyMonitoringOperations
-            : nil
+        devices = MultitouchDeviceRegistration(operations: operations, callback: Self.contactCallback)
+        topologyMonitor = MultitouchTopologyMonitor(
+            operations: topologyMonitoringEnabled
+                ? topologyMonitoringOperations ?? MultitouchTopologyMonitor.liveOperations
+                : nil,
+            retryDelays: retryDelays
+        )
         self.coalescingDelay = coalescingDelay
         self.wakeSettlingDelay = wakeSettlingDelay
         self.retryDelays = retryDelays
     }
 
     deinit {
-        topologyTask?.cancel()
         revalidationTask?.cancel()
     }
 
@@ -656,7 +117,7 @@ final class MultitouchGestureSource {
             return true
         }
         state = .waiting
-        startTopologyMonitoring()
+        topologyMonitor.start(source: self)
         requestRevalidation(.startup)
         return true
     }
@@ -674,15 +135,15 @@ final class MultitouchGestureSource {
         if state == .suspended, reason != .wake, reason != .unlock {
             return
         }
-        if topologyObserverState == .exhausted,
+        if topologyMonitor.topologyObserverState == .exhausted,
            reason == .startup || reason == .wake || reason == .unlock
         {
-            startTopologyMonitoring()
+            topologyMonitor.start(source: self)
         }
         if !episodeActive {
             episodeActive = true
             episodeReasons.removeAll(keepingCapacity: true)
-            episodeBaselineDeviceIds = Set(registrations.map(\.device.registryId))
+            episodeBaselineDeviceIds = devices.registryIds
             retryEpisode &+= 1
             retryAttempt = 0
             retryExhausted = false
@@ -727,8 +188,7 @@ final class MultitouchGestureSource {
         revalidationTask?.cancel()
         revalidationTask = nil
         revalidationSchedule &+= 1
-        topologyTask?.cancel()
-        topologyTask = nil
+        topologyMonitor.cancel()
         episodeActive = false
         episodeReasons.removeAll(keepingCapacity: false)
         episodeBaselineDeviceIds.removeAll(keepingCapacity: false)
@@ -738,7 +198,7 @@ final class MultitouchGestureSource {
         episodeReplacementState = .notRequested
         invalidateActiveGeneration()
         let cleanedUp = teardownRegistrations(resetGestureState: true)
-        topologyObserverState = .stopped
+        topologyMonitor.finishStop()
         state = .stopped
         if cleanedUp, MultitouchGestureSource.shared === self {
             MultitouchGestureSource.shared = nil
@@ -749,148 +209,6 @@ final class MultitouchGestureSource {
     func receiveTopologySignal(_ signal: TopologySignal) {
         lastTopologySignal = signal
         requestRevalidation(signal == .arrival ? .arrival : .removal)
-    }
-
-    func diagnosticsSnapshot() -> DiagnosticsSnapshot {
-        DiagnosticsSnapshot(
-            state: state,
-            activeGeneration: activeGeneration == 0 ? nil : activeGeneration,
-            registeredDeviceCount: registrations.filter(\.registered).count,
-            lastEnumeration: lastEnumeration,
-            lastRegister: lastRegister,
-            lastStart: lastStart,
-            lastRunningCheck: lastRunningCheck,
-            lastStop: lastStop,
-            lastUnregister: lastUnregister,
-            retryReasons: episodeReasons.sorted { $0.rawValue < $1.rawValue },
-            retryEpisode: retryEpisode,
-            retryAttempt: retryAttempt,
-            maximumAttempts: retryDelays.count + 1,
-            nextRetryDelay: nextRetryDelay,
-            retryExhausted: retryExhausted,
-            topologyObserverState: topologyObserverState,
-            lastTopologySignal: lastTopologySignal,
-            lastRawCallbackTimestamp: lastRawCallbackTimestamp,
-            lastRawCallbackGeneration: lastRawCallbackGeneration,
-            lastAcceptedCallbackTimestamp: lastAcceptedCallbackTimestamp,
-            lastAcceptedCallbackGeneration: lastAcceptedCallbackGeneration
-        )
-    }
-
-    nonisolated func beginPerformanceCapture() {
-        rawFrameMailbox.beginPerformanceCapture()
-    }
-
-    nonisolated func performanceSnapshot() -> MultitouchFrameMailbox.PerformanceSnapshot? {
-        rawFrameMailbox.performanceSnapshot()
-    }
-
-    nonisolated func endPerformanceCapture() -> MultitouchFrameMailbox.PerformanceSnapshot? {
-        rawFrameMailbox.endPerformanceCapture()
-    }
-
-    func handleRawFrame(
-        _ frame: RawFrame,
-        generation: UInt,
-        location: CGPoint
-    ) {
-        guard recordAndAccept(frame, generation: generation) else { return }
-        emitSnapshot(frame, location: location)
-    }
-
-    private func recordAndAccept(_ frame: RawFrame, generation: UInt) -> Bool {
-        lastRawCallbackTimestamp = frame.timestamp
-        lastRawCallbackGeneration = generation
-        guard state == .running, generation != 0, generation == activeGeneration else { return false }
-        lastAcceptedCallbackTimestamp = frame.timestamp
-        lastAcceptedCallbackGeneration = generation
-        return true
-    }
-
-    private func emitSnapshot(_ frame: RawFrame, location: CGPoint) {
-        traceContactChanges(frame)
-        let result = MultitouchGestureSource.makeSnapshot(
-            frame: frame,
-            location: location,
-            previousActiveCount: previousActiveCount
-        )
-        previousActiveCount = result.activeCount
-        if let snapshot = result.snapshot {
-            onSnapshot?(snapshot)
-        }
-    }
-
-    /// One mouse-trace line per change in contact or palm count, carrying each contact's ellipse axes
-    /// and pressure so the palm threshold can be tuned from a captured trace.
-    private func traceContactChanges(_ frame: RawFrame) {
-        let activeCount = frame.touches.count
-        guard activeCount != previousActiveCount || frame.rejectedPalmCount != previousRejectedPalmCount else {
-            return
-        }
-        previousRejectedPalmCount = frame.rejectedPalmCount
-        MouseTrace.record(Self.describeContacts(frame))
-    }
-
-    static func describeContacts(_ frame: RawFrame) -> String {
-        let contacts = frame.touches.map { touch in
-            String(format: "%.1fx%.1f z%.2f", touch.majorAxis, touch.minorAxis, touch.size)
-        }.joined(separator: ", ")
-        var line = "multitouch: \(frame.touches.count) contacts [\(contacts)]"
-        if frame.rejectedPalmCount > 0 {
-            line += String(
-                format: ", %d rejected as palm (major %.1f)",
-                frame.rejectedPalmCount,
-                frame.rejectedPalmMajorAxis
-            )
-        }
-        return line
-    }
-
-    static func makeSnapshot(
-        frame: RawFrame,
-        location: CGPoint,
-        previousActiveCount: Int
-    ) -> (snapshot: MouseEventHandler.GestureEventSnapshot?, activeCount: Int) {
-        let activeCount = frame.touches.count
-        if activeCount == 0 {
-            guard previousActiveCount > 0 else { return (nil, 0) }
-            return (liftSnapshot(.ended, location: location, timestamp: frame.timestamp), 0)
-        }
-
-        let phase: NSEvent.Phase = previousActiveCount == 0 ? .began : .changed
-        let touches = frame.touches.map { touch in
-            MouseEventHandler.GestureTouchSample(
-                phase: .moved,
-                normalizedPosition: normalizedPosition(x: touch.x, y: touch.y)
-            )
-        }
-        let snapshot = MouseEventHandler.GestureEventSnapshot(
-            location: location,
-            phaseRawValue: phase.rawValue,
-            timestamp: frame.timestamp,
-            touches: touches
-        )
-        return (snapshot, activeCount)
-    }
-
-    private static func liftSnapshot(
-        _ phase: NSEvent.Phase,
-        location: CGPoint,
-        timestamp: Double
-    ) -> MouseEventHandler.GestureEventSnapshot {
-        MouseEventHandler.GestureEventSnapshot(
-            location: location,
-            phaseRawValue: phase.rawValue,
-            timestamp: timestamp,
-            touches: []
-        )
-    }
-
-    private func cancelRawGesture(_ frame: RawFrame, generation: UInt, location: CGPoint) {
-        guard recordAndAccept(frame, generation: generation), previousActiveCount > 0 else { return }
-        previousActiveCount = 0
-        previousRejectedPalmCount = 0
-        onSnapshot?(Self.liftSnapshot(.cancelled, location: location, timestamp: frame.timestamp))
     }
 
     private func scheduleRevalidation(after delay: Duration, settlesWake: Bool = false) {
@@ -907,16 +225,8 @@ final class MultitouchGestureSource {
             do {
                 try await operations.sleep(delay)
             } catch {
-                guard let self, revalidationSchedule == schedule else { return }
-                revalidationTask = nil
-                nextRetryDelay = nil
-                wakeSettlingArmed = false
-                if !Task.isCancelled {
-                    episodeActive = false
-                    retryExhausted = true
-                    episodeReplacementState = .notRequested
-                    state = activeGeneration == 0 ? .exhausted : .running
-                }
+                guard let self else { return }
+                handleRevalidationWaitFailure(schedule: schedule)
                 return
             }
             guard !Task.isCancelled,
@@ -948,9 +258,22 @@ final class MultitouchGestureSource {
         }
     }
 
+    private func handleRevalidationWaitFailure(schedule: UInt64) {
+        guard revalidationSchedule == schedule else { return }
+        revalidationTask = nil
+        nextRetryDelay = nil
+        wakeSettlingArmed = false
+        if !Task.isCancelled {
+            episodeActive = false
+            retryExhausted = true
+            episodeReplacementState = .notRequested
+            state = activeGeneration == 0 ? .exhausted : .running
+        }
+    }
+
     private func revalidate() -> Bool {
         guard let operations else { return false }
-        if activeGeneration == 0, !registrations.isEmpty {
+        if activeGeneration == 0, !devices.isEmpty {
             guard teardownRegistrations(resetGestureState: false) else { return false }
         }
 
@@ -963,13 +286,12 @@ final class MultitouchGestureSource {
         }
 
         let discoveredIds = Set(enumeration.devices.map(\.registryId))
-        let registeredIds = Set(registrations.map(\.device.registryId))
+        let registeredIds = devices.registryIds
         let forceReplacement = episodeReplacementState == .pending
         let awaitingTopologyChange = episodeReasons.contains(.arrival) || episodeReasons.contains(.removal)
         let topologyConverged = !awaitingTopologyChange || discoveredIds != episodeBaselineDeviceIds
         if activeGeneration != 0, discoveredIds == registeredIds, !forceReplacement {
-            let allRunning = registrations.allSatisfy { operations.isRunning($0.device.ref) }
-            lastRunningCheck = allRunning ? .success : .rejected
+            let allRunning = devices.allRunning()
             if allRunning {
                 state = .running
                 return topologyConverged
@@ -980,125 +302,6 @@ final class MultitouchGestureSource {
         guard teardownRegistrations(resetGestureState: true) else { return false }
         guard register(enumeration: enumeration) else { return false }
         return topologyConverged
-    }
-
-    private func register(enumeration: MultitouchBinding.Enumeration) -> Bool {
-        guard let operations else { return false }
-        let generation = Self.allocateRegistrationGeneration()
-        guard enumeration.devices.count <= RegistrationToken.slotCapacity else {
-            lastRegister = .rejected
-            return false
-        }
-
-        var candidates: [Registration] = []
-        candidates.reserveCapacity(enumeration.devices.count)
-        for (slot, device) in enumeration.devices.enumerated() {
-            let refcon = RegistrationToken(generation: generation, slot: slot).refcon
-            let registered = refcon.map { operations.register(device.ref, Self.contactCallback, $0) } ?? false
-            lastRegister = registered ? .success : .rejected
-            guard registered else {
-                _ = cleanup(&candidates)
-                retainIncompleteCleanup(candidates, list: enumeration.list)
-                return false
-            }
-            candidates.append(Registration(device: device, startAttempted: false, registered: true))
-
-            candidates[candidates.count - 1].startAttempted = true
-            let startStatus = operations.start(device.ref)
-            lastStart = startStatus == KERN_SUCCESS ? .success : .status(startStatus)
-            guard startStatus == KERN_SUCCESS else {
-                _ = cleanup(&candidates)
-                retainIncompleteCleanup(candidates, list: enumeration.list)
-                return false
-            }
-            let running = operations.isRunning(device.ref)
-            lastRunningCheck = running ? .success : .rejected
-            guard running else {
-                _ = cleanup(&candidates)
-                retainIncompleteCleanup(candidates, list: enumeration.list)
-                return false
-            }
-        }
-
-        registrations = candidates
-        deviceList = enumeration.list
-        activeGeneration = generation
-        rawFrameMailbox.activate(generation: generation)
-        if episodeReplacementState == .pending {
-            episodeReplacementState = .completed
-        }
-        state = .running
-        return true
-    }
-
-    private func retainIncompleteCleanup(_ candidates: [Registration], list: CFArray?) {
-        let incomplete = candidates.filter { $0.startAttempted || $0.registered }
-        guard !incomplete.isEmpty else { return }
-        registrations = incomplete
-        deviceList = list
-    }
-
-    private func teardownRegistrations(resetGestureState: Bool) -> Bool {
-        if resetGestureState, !registrations.isEmpty || previousActiveCount > 0 {
-            onSourceWillReplace?()
-            previousActiveCount = 0
-            previousRejectedPalmCount = 0
-        }
-        let succeeded = cleanup(&registrations)
-        guard succeeded else { return false }
-        registrations.removeAll(keepingCapacity: false)
-        deviceList = nil
-        return true
-    }
-
-    private func cleanup(_ registrations: inout [Registration]) -> Bool {
-        guard let operations else { return registrations.isEmpty }
-        var succeeded = true
-        var stopResult: OperationResult = .notAttempted
-        var stopFailure: OperationResult?
-        var unregisterResult: OperationResult = .notAttempted
-        for index in registrations.indices where registrations[index].startAttempted {
-            let status = operations.stop(registrations[index].device.ref)
-            let stopped = status == KERN_SUCCESS || status == kIOReturnNotOpen
-            let result: OperationResult = if status == KERN_SUCCESS {
-                .success
-            } else if status == kIOReturnNotOpen {
-                .alreadyStopped(status)
-            } else {
-                .status(status)
-            }
-            if stopResult == .notAttempted {
-                stopResult = result
-            } else if stopResult == .success, result != .success {
-                stopResult = result
-            }
-            if stopped {
-                registrations[index].startAttempted = false
-            } else {
-                succeeded = false
-                if stopFailure == nil {
-                    stopFailure = result
-                }
-            }
-        }
-        for index in registrations.indices where registrations[index].registered {
-            let unregistered = operations.unregister(registrations[index].device.ref, Self.contactCallback)
-            let result: OperationResult = unregistered ? .success : .alreadyUnregistered
-            if unregisterResult == .notAttempted {
-                unregisterResult = result
-            } else if unregisterResult == .success, result != .success {
-                unregisterResult = result
-            }
-            registrations[index].registered = false
-        }
-        lastStop = stopFailure ?? stopResult
-        lastUnregister = unregisterResult
-        return succeeded
-    }
-
-    private func invalidateActiveGeneration() {
-        activeGeneration = 0
-        rawFrameMailbox.invalidate()
     }
 
     private func finishRevalidation() {
@@ -1123,95 +326,85 @@ final class MultitouchGestureSource {
         wakeSettlingArmed = false
         episodeReplacementState = .notRequested
     }
+}
 
-    private static var liveTopologyMonitoringOperations: TopologyMonitoringOperations {
-        let manager = HIDDeviceManager()
-        return TopologyMonitoringOperations(
-            notifications: {
-                let notifications = await manager.monitorNotifications(matchingCriteria: topologyCriteria)
-                return topologySignals(from: notifications)
-            },
-            sleep: { try await Task.sleep(for: $0) }
+extension MultitouchGestureSource {
+    func diagnosticsSnapshot() -> DiagnosticsSnapshot {
+        DiagnosticsSnapshot(
+            state: state,
+            activeGeneration: activeGeneration == 0 ? nil : activeGeneration,
+            registeredDeviceCount: devices.registeredCount,
+            lastEnumeration: lastEnumeration,
+            lastRegister: devices.lastRegister,
+            lastStart: devices.lastStart,
+            lastRunningCheck: devices.lastRunningCheck,
+            lastStop: devices.lastStop,
+            lastUnregister: devices.lastUnregister,
+            retryReasons: episodeReasons.sorted { $0.rawValue < $1.rawValue },
+            retryEpisode: retryEpisode,
+            retryAttempt: retryAttempt,
+            maximumAttempts: retryDelays.count + 1,
+            nextRetryDelay: nextRetryDelay,
+            retryExhausted: retryExhausted,
+            topologyObserverState: topologyMonitor.topologyObserverState,
+            lastTopologySignal: lastTopologySignal,
+            lastRawCallbackTimestamp: lastRawCallbackTimestamp,
+            lastRawCallbackGeneration: lastRawCallbackGeneration,
+            lastAcceptedCallbackTimestamp: lastAcceptedCallbackTimestamp,
+            lastAcceptedCallbackGeneration: lastAcceptedCallbackGeneration
         )
     }
 
-    private static func topologySignals(
-        from notifications: AsyncThrowingStream<HIDDeviceManager.Notification, any Error>
-    ) -> TopologyMonitoringOperations.Notifications {
-        TopologyMonitoringOperations.Notifications { continuation in
-            let task = Task {
-                do {
-                    for try await notification in notifications {
-                        switch notification {
-                        case .deviceMatched:
-                            continuation.yield(.arrival)
-                        case .deviceRemoved:
-                            continuation.yield(.removal)
-                        @unknown default:
-                            break
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
+    nonisolated func beginPerformanceCapture() {
+        rawFrameMailbox.beginPerformanceCapture()
+    }
+
+    nonisolated func performanceSnapshot() -> MultitouchFrameMailbox.PerformanceSnapshot? {
+        rawFrameMailbox.performanceSnapshot()
+    }
+
+    nonisolated func endPerformanceCapture() -> MultitouchFrameMailbox.PerformanceSnapshot? {
+        rawFrameMailbox.endPerformanceCapture()
+    }
+
+    func handleRawFrame(
+        _ frame: RawFrame,
+        generation: UInt,
+        location: CGPoint,
+        terminalPhase: NSEvent.Phase = .ended,
+        contactSession: MultitouchContactSession? = nil
+    ) {
+        lastRawCallbackTimestamp = frame.timestamp
+        lastRawCallbackGeneration = generation
+        guard state == .running, generation != 0, generation == activeGeneration else { return }
+        lastAcceptedCallbackTimestamp = frame.timestamp
+        lastAcceptedCallbackGeneration = generation
+        if frame.touches.count != previousActiveCount || frame.rejectedPalmCount != previousRejectedPalmCount {
+            MouseTrace.record(Self.describeContacts(frame))
+        }
+        previousRejectedPalmCount = frame.rejectedPalmCount
+        let result = Self.makeSnapshot(
+            frame: frame,
+            location: location,
+            previousActiveCount: previousActiveCount,
+            terminalPhase: terminalPhase,
+            contactSession: contactSession
+        )
+        previousActiveCount = result.activeCount
+        if let snapshot = result.snapshot {
+            onSnapshot?(snapshot)
         }
     }
 
-    private func startTopologyMonitoring() {
-        guard let topologyMonitoringOperations, topologyTask == nil else { return }
-        let observerRetryDelays = retryDelays
-        topologyObserverState = .monitoring
-        topologyTask = Task { @MainActor [weak self] in
-            var failures = 0
-            while !Task.isCancelled {
-                do {
-                    let notifications = await topologyMonitoringOperations.notifications()
-                    for try await signal in notifications {
-                        guard !Task.isCancelled, let self else { return }
-                        failures = 0
-                        topologyObserverState = .monitoring
-                        receiveTopologySignal(signal)
-                    }
-                    guard !Task.isCancelled else { return }
-                } catch {
-                    guard !Task.isCancelled else { return }
-                }
-
-                failures += 1
-                let retryDelay: Duration
-                do {
-                    guard let self else { return }
-                    self.requestRevalidation(.observerRecovery)
-                    guard failures <= observerRetryDelays.count else {
-                        self.topologyObserverState = .exhausted
-                        self.topologyTask = nil
-                        return
-                    }
-                    self.topologyObserverState = .retrying(failures)
-                    retryDelay = observerRetryDelays[failures - 1]
-                }
-                do {
-                    try await topologyMonitoringOperations.sleep(retryDelay)
-                } catch {
-                    return
-                }
-            }
-        }
+    private final class WeakSharedRoute: @unchecked Sendable {
+        weak var source: MultitouchGestureSource?
     }
 
-    private static func allocateRegistrationGeneration() -> UInt {
-        repeat {
-            nextRegistrationGeneration &+= 1
-        } while nextRegistrationGeneration == 0
-        return nextRegistrationGeneration
-    }
+    private nonisolated static let sharedRoute = OSAllocatedUnfairLock(initialState: WeakSharedRoute())
 
-    private static func normalizedPosition(x: Float, y: Float) -> CGPoint? {
-        guard x.isFinite, y.isFinite else { return nil }
-        return CGPoint(x: CGFloat(x), y: CGFloat(y))
+    nonisolated static var shared: MultitouchGestureSource? {
+        get { sharedRoute.withLock { $0.source } }
+        set { sharedRoute.withLock { $0.source = newValue } }
     }
 
     private static let contactCallback: MultitouchBinding.ContactCallback = { _, fingers, count, timestamp, _, refcon in
@@ -1231,52 +424,77 @@ final class MultitouchGestureSource {
         }
     }
 
-    private func drainRawFrameMailbox() {
-        let deliveries = rawFrameMailbox.take()
-        guard !deliveries.isEmpty else { return }
-        let location = NSEvent.mouseLocation
-        for delivery in deliveries {
-            if delivery.kind == .cancelled {
-                cancelRawGesture(delivery.frame, generation: delivery.generation, location: location)
-            } else {
-                handleRawFrame(delivery.frame, generation: delivery.generation, location: location)
-            }
-        }
-        rawFrameMailbox.recycle(deliveries)
+    func hasSender(_ senderId: UInt64) -> Bool {
+        state == .running && devices.hasSender(senderId)
     }
 
-    /// Decodes a MultitouchSupport contact frame. Raw frames arrive before Apple's palm rejection, so a
-    /// resting palm shows up as an ordinary touching contact; it is dropped here by contact size.
-    nonisolated static func buildRawFrame(
-        fingers: UnsafeMutableRawPointer?,
-        count: Int32,
-        timestamp: Double
-    ) -> RawFrame {
-        guard let fingers, count > 0 else { return RawFrame(touches: [], timestamp: timestamp) }
-        var touches = RawTouchBuffer()
-        var rejectedPalmCount = 0
-        var rejectedPalmMajorAxis: Float = 0
-        for index in 0 ..< Int(count) {
-            let base = index * multitouchTouchStride
-            let state = fingers.load(fromByteOffset: base + multitouchStateByteOffset, as: Int32.self)
-            guard state == multitouchTouchingState else { continue }
-            let majorAxis = fingers.load(fromByteOffset: base + multitouchMajorAxisByteOffset, as: Float.self)
-            if isPalm(majorAxis: majorAxis) {
-                rejectedPalmCount += 1
-                rejectedPalmMajorAxis = max(rejectedPalmMajorAxis, majorAxis)
-                continue
-            }
-            let x = fingers.load(fromByteOffset: base + multitouchPositionXByteOffset, as: Float.self)
-            let y = fingers.load(fromByteOffset: base + multitouchPositionYByteOffset, as: Float.self)
-            let minorAxis = fingers.load(fromByteOffset: base + multitouchMinorAxisByteOffset, as: Float.self)
-            let size = fingers.load(fromByteOffset: base + multitouchSizeByteOffset, as: Float.self)
-            touches.append(RawTouch(x: x, y: y, majorAxis: majorAxis, minorAxis: minorAxis, size: size))
+    func drainRawFrameMailbox(location: CGPoint? = nil) {
+        let batch = rawFrameMailbox.take()
+        defer { rawFrameMailbox.recycle(batch.deliveries) }
+        guard state == .running, activeGeneration != 0,
+              batch.contacts.generation == activeGeneration
+        else { return }
+        if batch.contactsChanged {
+            onContactSessions?(batch.contacts)
         }
-        return RawFrame(
-            touches: touches,
-            timestamp: timestamp,
-            rejectedPalmCount: rejectedPalmCount,
-            rejectedPalmMajorAxis: rejectedPalmMajorAxis
-        )
+        guard !batch.deliveries.isEmpty else { return }
+        let cursorLocation: CGPoint
+        if let location {
+            cursorLocation = location
+        } else {
+            cursorLocation = NSEvent.mouseLocation
+            rawFrameMailbox.recordCursorSample()
+        }
+        for delivery in batch.deliveries {
+            guard delivery.generation == activeGeneration else { continue }
+            let contactSession = MultitouchContactSession(
+                generation: delivery.generation,
+                slot: delivery.slot,
+                session: delivery.contactSession,
+                senderId: devices.senderId(at: delivery.slot)
+            )
+            handleRawFrame(
+                delivery.frame,
+                generation: delivery.generation,
+                location: cursorLocation,
+                terminalPhase: delivery.kind == .cancelled ? .cancelled : .ended,
+                contactSession: contactSession
+            )
+        }
+    }
+}
+
+extension MultitouchGestureSource {
+    private static func allocateRegistrationGeneration() -> UInt {
+        repeat {
+            nextRegistrationGeneration &+= 1
+        } while nextRegistrationGeneration == 0
+        return nextRegistrationGeneration
+    }
+
+    private func register(enumeration: MultitouchBinding.Enumeration) -> Bool {
+        let generation = Self.allocateRegistrationGeneration()
+        guard devices.register(enumeration: enumeration, generation: generation) else { return false }
+        activeGeneration = generation
+        rawFrameMailbox.activate(generation: generation)
+        if episodeReplacementState == .pending {
+            episodeReplacementState = .completed
+        }
+        state = .running
+        return true
+    }
+
+    private func teardownRegistrations(resetGestureState: Bool) -> Bool {
+        if resetGestureState, !devices.isEmpty || previousActiveCount > 0 {
+            onSourceWillReplace?()
+            previousActiveCount = 0
+            previousRejectedPalmCount = 0
+        }
+        return devices.teardown()
+    }
+
+    private func invalidateActiveGeneration() {
+        activeGeneration = 0
+        rawFrameMailbox.invalidate()
     }
 }

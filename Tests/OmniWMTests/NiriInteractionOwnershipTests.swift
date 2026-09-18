@@ -330,7 +330,8 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
         XCTAssertTrue(engine.findColumn(containing: sibling, in: sourceWorkspace) === sourceColumn)
         XCTAssertEqual(sourceColumn.width, .fixed(resizedWidth))
         XCTAssertEqual(sourceColumn.cachedWidth, resizedWidth)
-        XCTAssertTrue(sourceColumn.hasManualSingleWindowWidthOverride)
+        XCTAssertFalse(sourceColumn.hasManualSingleWindowWidthOverride)
+        XCTAssertEqual(layout(engine, in: sourceWorkspace)[sibling.token], workingFrame)
     }
 }
 
@@ -481,10 +482,9 @@ final class NiriInteractionLifecycleTests: NiriInteractionTestCase {
             engine.moveColumnToWorkspace(
                 column,
                 from: workspaceA,
-                to: workspaceB,
+                to: NiriWorkspaceDestination(workspaceId: workspaceB, orientation: .horizontal),
                 sourceState: &sourceState,
-                targetState: &targetState,
-                targetOrientation: .horizontal
+                targetState: &targetState
             )
         )
         XCTAssertNil(engine.interactiveMove)
@@ -505,10 +505,9 @@ final class NiriInteractionLifecycleTests: NiriInteractionTestCase {
             engine.moveColumnToWorkspace(
                 column,
                 from: workspaceA,
-                to: workspaceB,
+                to: NiriWorkspaceDestination(workspaceId: workspaceB, orientation: .horizontal),
                 sourceState: &sourceState,
-                targetState: &targetState,
-                targetOrientation: .horizontal
+                targetState: &targetState
             )
         )
         XCTAssertNil(engine.interactiveResize)
@@ -949,10 +948,9 @@ final class NiriInteractionOrientationTests: NiriInteractionTestCase {
             engine.moveColumnToWorkspace(
                 movedColumn,
                 from: sourceWorkspaceId,
-                to: targetWorkspaceId,
+                to: NiriWorkspaceDestination(workspaceId: targetWorkspaceId, orientation: .vertical),
                 sourceState: &sourceState,
-                targetState: &targetState,
-                targetOrientation: .vertical
+                targetState: &targetState
             )
         )
         XCTAssertEqual(movedColumn.cachedHeight, 0, accuracy: 0.001)

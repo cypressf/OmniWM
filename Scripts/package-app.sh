@@ -4,15 +4,21 @@ set -euo pipefail
 CONFIG="${1:-release}"
 SIGN_AND_NOTARIZE="${2:-true}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT_DIR/dist/OmniWM.app"
+APP_NAME="${OMNIWM_APP_NAME:-OmniWM}"
+BUNDLE_ID="${OMNIWM_BUNDLE_ID:-com.barut.OmniWM}"
+case "$APP_NAME" in
+  .|..|*/*)
+    echo "package-app: the app name must be a single directory name" >&2
+    exit 1
+    ;;
+esac
+APP_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 GHOSTTY_LIBRARY_DIR="$("$ROOT_DIR/Scripts/ghostty-preflight.sh" print-library-dir)"
 SWIFT_BUILD_ARGS=(-c "$CONFIG" --arch arm64)
 
 # Signing identity and notarization profile
 SIGNING_IDENTITY="${OMNIWM_SIGNING_IDENTITY:-Developer ID Application: Oliver Nikolic (VF8LDJRGFM)}"
 NOTARIZE_PROFILE="${OMNIWM_NOTARIZE_PROFILE:-OmniWM-Notarize}"
-# Self-signed local identity created by Scripts/create-dev-signing-identity.sh (dev mode only).
-DEV_SIGNING_IDENTITY="OmniWM Dev"
 ENTITLEMENTS="$ROOT_DIR/OmniWM.entitlements"
 
 echo "Running release checks..."
@@ -40,6 +46,11 @@ cp "$CLI_EXECUTABLE" "$APP_DIR/Contents/MacOS/omniwmctl"
 cp "$ROOT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
 if command -v plutil >/dev/null 2>&1; then
   plutil -replace OMNIWMGitHash -string "$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo SNAPSHOT)" "$APP_DIR/Contents/Info.plist"
+  if [ "$APP_NAME" != "OmniWM" ] || [ "$BUNDLE_ID" != "com.barut.OmniWM" ]; then
+    plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP_DIR/Contents/Info.plist"
+    plutil -replace CFBundleName -string "$APP_NAME" "$APP_DIR/Contents/Info.plist"
+    plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP_DIR/Contents/Info.plist"
+  fi
 fi
 cp "$ROOT_DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 cp -R "$BUILD_DIR/OmniWM_OmniWM.bundle" "$APP_DIR/Contents/Resources/"
@@ -77,22 +88,11 @@ if [ "$SIGN_AND_NOTARIZE" = "true" ]; then
   rm -f "$ZIP_PATH"
   echo "Done! $APP_DIR is signed and notarized."
 elif [ "$SIGN_AND_NOTARIZE" = "dev" ]; then
-  # Prefer a real certificate over ad-hoc signing: TCC (Accessibility, Screen Recording, ...)
-  # keys its grants on the designated requirement, and an ad-hoc requirement is the cdhash of
-  # the exact binary, so every rebuild would have to be re-authorized. Any certificate in the
-  # login keychain gives a requirement that is stable across builds. Create one with
-  # ./Scripts/create-dev-signing-identity.sh
-  IDENTITY="-"
-  for candidate in "$SIGNING_IDENTITY" "$DEV_SIGNING_IDENTITY"; do
-    if security find-identity -v -p codesigning | grep -qF "\"$candidate\""; then
-      IDENTITY="$candidate"
-      break
-    fi
-  done
-  if [ "$IDENTITY" = "-" ]; then
-    echo "warning: no code-signing identity found; signing ad-hoc. macOS will ask for Accessibility and" >&2
-    echo "         Screen Recording permission again after every rebuild. Run" >&2
-    echo "         ./Scripts/create-dev-signing-identity.sh once to create a stable local identity." >&2
+  if security find-identity -v -p codesigning | grep -qF "$SIGNING_IDENTITY"; then
+    IDENTITY="$SIGNING_IDENTITY"
+  else
+    IDENTITY="-"
+    echo "No '$SIGNING_IDENTITY' certificate found; using ad-hoc signing. macOS may request permissions again after rebuilding. See CONTRIBUTING.md for certificate setup." >&2
   fi
   echo "Signing $APP_DIR for development (identity: $IDENTITY)..."
   codesign --force --sign "$IDENTITY" "$APP_DIR/Contents/MacOS/omniwmctl"

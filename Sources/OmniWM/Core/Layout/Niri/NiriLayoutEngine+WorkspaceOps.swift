@@ -29,6 +29,7 @@ extension NiriLayoutEngine {
             return nil
         }
 
+        let wasSingleWindow = singleWindowLayoutContext(in: sourceWorkspaceId) != nil
         let targetWorkspaceState = ensureState(for: targetWorkspaceId)
         let targetRoot = targetWorkspaceState.root
 
@@ -57,6 +58,7 @@ extension NiriLayoutEngine {
         targetWorkspaceState.index(window)
 
         cleanupEmptyColumn(sourceColumn, in: sourceWorkspaceId, state: &sourceState)
+        clearManualSpanOverridesOnSingleWindowEntry(in: sourceWorkspaceId, wasSingleWindow: wasSingleWindow)
 
         sourceState.selectedNodeId = fallbackSelection
 
@@ -72,11 +74,11 @@ extension NiriLayoutEngine {
     func moveColumnToWorkspace(
         _ column: NiriContainer,
         from sourceWorkspaceId: WorkspaceDescriptor.ID,
-        to targetWorkspaceId: WorkspaceDescriptor.ID,
+        to destination: NiriWorkspaceDestination,
         sourceState: inout ViewportState,
-        targetState: inout ViewportState,
-        targetOrientation: Monitor.Orientation
+        targetState: inout ViewportState
     ) -> WorkspaceMoveResult? {
+        let targetWorkspaceId = destination.workspaceId
         assertSanctionedMutation()
         guard sourceWorkspaceId != targetWorkspaceId else { return nil }
 
@@ -86,6 +88,7 @@ extension NiriLayoutEngine {
             return nil
         }
 
+        let wasSingleWindow = singleWindowLayoutContext(in: sourceWorkspaceId) != nil
         let targetWorkspaceState = ensureState(for: targetWorkspaceId)
         let targetRoot = targetWorkspaceState.root
         let movedWindows = column.windowNodes
@@ -111,12 +114,13 @@ extension NiriLayoutEngine {
 
         column.detach()
         targetRoot.appendChild(column)
-        column.invalidateCachedPrimarySpan(orientation: targetOrientation)
+        column.invalidateCachedPrimarySpan(orientation: destination.orientation)
 
         for window in movedWindows {
             sourceWorkspaceState.unindex(window)
             targetWorkspaceState.index(window)
         }
+        clearManualSpanOverridesOnSingleWindowEntry(in: sourceWorkspaceId, wasSingleWindow: wasSingleWindow)
 
         sourceState.selectedNodeId = fallbackSelection
 

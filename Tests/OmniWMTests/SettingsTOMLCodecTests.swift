@@ -7,6 +7,36 @@ import Foundation
 import XCTest
 
 final class SettingsTOMLCodecTests: XCTestCase {
+    func testTabRailAppIconsDefaultsAndRoundTrips() throws {
+        var export = SettingsExport.defaults()
+        XCTAssertFalse(export.tabRailAppIcons)
+
+        for enabled in [false, true] {
+            export.tabRailAppIcons = enabled
+            let data = try SettingsTOMLCodec.encode(export)
+            let text = String(decoding: data, as: UTF8.self)
+            let appearanceSection = try XCTUnwrap(text.components(separatedBy: "[appearance]\n").last)
+                .components(separatedBy: "\n[").first
+
+            XCTAssertTrue(try XCTUnwrap(appearanceSection).contains("tabRailAppIcons = \(enabled)"))
+            XCTAssertEqual(try SettingsTOMLCodec.decode(data), export)
+            XCTAssertFalse(SettingsTOMLCodec.unknownKeyPaths(in: data).contains("appearance.tabRailAppIcons"))
+        }
+    }
+
+    func testMissingTabRailAppIconsDefaultsToCompactWithoutMigration() throws {
+        let withoutKey = try canonicalDefaultLines { lines in
+            let index = try XCTUnwrap(lines.firstIndex(of: "tabRailAppIcons = false"))
+            lines.remove(at: index)
+        }
+
+        let result = try SettingsTOMLCodec.decodeForLoad(withoutKey)
+
+        XCTAssertFalse(result.export.tabRailAppIcons)
+        XCTAssertNil(result.migration)
+        XCTAssertNil(result.migratedData)
+    }
+
     func testDefaultTOMLOmitsUnassignableHotkeyActions() throws {
         let toml = String(
             decoding: try SettingsTOMLCodec.encode(.defaults()),
@@ -101,17 +131,17 @@ final class SettingsTOMLCodecTests: XCTestCase {
     func testRaiseOnMouseFocusDefaultsAndRoundTrips() throws {
         var export = SettingsExport.defaults()
 
-        XCTAssertFalse(export.raiseOnMouseFocus)
+        XCTAssertFalse(export.focus.raiseOnMouseFocus)
         XCTAssertTrue(
             String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
                 .contains("raiseOnMouseFocus = false")
         )
 
-        export.raiseOnMouseFocus = true
+        export.focus.raiseOnMouseFocus = true
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("raiseOnMouseFocus = true"))
-        XCTAssertTrue(try SettingsTOMLCodec.decode(data).raiseOnMouseFocus)
+        XCTAssertTrue(try SettingsTOMLCodec.decode(data).focus.raiseOnMouseFocus)
     }
 
     func testTOMLRejectsMissingFullscreenOuterGapPolicy() throws {
@@ -239,9 +269,9 @@ final class SettingsTOMLCodecTests: XCTestCase {
     }
 
     func testFullscreenGapPolicyAndMonitorOverridesRoundTrip() throws {
-        XCTAssertFalse(SettingsExport.defaults().fullscreenUsesOuterGaps)
+        XCTAssertFalse(SettingsExport.defaults().gaps.fullscreenUsesOuterGaps)
         var export = SettingsExport.defaults()
-        export.fullscreenUsesOuterGaps = true
+        export.gaps.fullscreenUsesOuterGaps = true
         export.monitorGapSettings = [
             MonitorGapSettings(
                 monitorName: "Built-in",
@@ -255,7 +285,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         let data = try SettingsTOMLCodec.encode(export)
         let decoded = try SettingsTOMLCodec.decode(data)
 
-        XCTAssertTrue(decoded.fullscreenUsesOuterGaps)
+        XCTAssertTrue(decoded.gaps.fullscreenUsesOuterGaps)
         XCTAssertEqual(decoded.monitorGapSettings, export.monitorGapSettings)
         let toml = String(decoding: data, as: UTF8.self)
         XCTAssertTrue(toml.contains("innerGap = 6.0"))
@@ -270,7 +300,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         )
 
         var export = try SettingsTOMLCodec.decode(previous)
-        export.gapSize = 24
+        export.gaps.size = 24
 
         let rewritten = String(
             decoding: try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous),
@@ -322,7 +352,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         )
 
         var export = try SettingsTOMLCodec.decode(previous)
-        export.gapSize = 24
+        export.gaps.size = 24
 
         let rewritten = String(
             decoding: try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous),
@@ -349,7 +379,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         )
 
         var export = try SettingsTOMLCodec.decode(previous)
-        export.gapSize = 24
+        export.gaps.size = 24
 
         let rewritten = String(
             decoding: try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous),
@@ -370,14 +400,40 @@ final class SettingsTOMLCodecTests: XCTestCase {
         let previous = try SettingsTOMLCodec.encode(.defaults())
 
         var export = try SettingsTOMLCodec.decode(previous)
-        export.quakeTerminalOpacity = nil
+        export.quakeTerminal.opacity = nil
 
         let rewrittenData = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
         let rewritten = String(decoding: rewrittenData, as: UTF8.self)
         let decoded = try SettingsTOMLCodec.decode(rewrittenData)
 
         XCTAssertFalse(rewritten.contains("opacity = 1.0"))
-        XCTAssertNil(decoded.quakeTerminalOpacity)
+        XCTAssertNil(decoded.quakeTerminal.opacity)
+    }
+
+    func testMonitorRankingRoundTripsInOrderAndTableIsOmittedWhenEmpty() throws {
+        let defaults = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
+        XCTAssertFalse(defaults.contains("[monitors]"))
+        XCTAssertFalse(defaults.contains("ranking"))
+        XCTAssertEqual(try SettingsTOMLCodec.decode(Data(defaults.utf8)).monitorRanking, [])
+
+        var export = SettingsExport.defaults()
+        export.monitorRanking = [
+            OutputId(displayUUID: "22222222-2222-2222-2222-222222222222", name: "DELL U3423WE"),
+            OutputId(displayId: 7, name: "LG HDR 4K"),
+            OutputId(name: "Built-in Retina Display")
+        ]
+
+        let data = try SettingsTOMLCodec.encode(export)
+        let toml = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(toml.contains("[[monitors.ranking]]"), toml)
+        XCTAssertTrue(toml.contains("displayUUID = \"22222222-2222-2222-2222-222222222222\""), toml)
+
+        let decoded = try SettingsTOMLCodec.decode(data)
+        XCTAssertEqual(decoded.monitorRanking.map(\.name), ["DELL U3423WE", "LG HDR 4K", "Built-in Retina Display"])
+        XCTAssertEqual(decoded.monitorRanking[0].displayUUID, "22222222-2222-2222-2222-222222222222")
+        XCTAssertEqual(decoded.monitorRanking[1].displayId, 7)
+        XCTAssertNil(decoded.monitorRanking[2].displayUUID)
+        XCTAssertNil(decoded.monitorRanking[2].displayId)
     }
 
     @MainActor
@@ -397,7 +453,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         let persistence = SettingsFilePersistence(directory: directory, startWatching: false, deferSaves: false)
         var export = persistence.load()
-        export.gapSize = 24
+        export.gaps.size = 24
 
         try persistence.saveImmediately(export)
 
@@ -416,18 +472,18 @@ final class SettingsTOMLCodecTests: XCTestCase {
     }
 
     func testTrackpadScrollStyleRoundTrips() throws {
-        XCTAssertEqual(SettingsExport.defaults().trackpadScrollStyle, .snap)
+        XCTAssertEqual(SettingsExport.defaults().gestures.trackpadScrollStyle, .snap)
 
         var export = SettingsExport.defaults()
-        export.trackpadScrollStyle = .momentum
+        export.gestures.trackpadScrollStyle = .momentum
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("trackpadScrollStyle = \"momentum\""))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(data).trackpadScrollStyle, .momentum)
+        XCTAssertEqual(try SettingsTOMLCodec.decode(data).gestures.trackpadScrollStyle, .momentum)
     }
 
     func testMouseMoveModifierRoundTrips() throws {
-        XCTAssertEqual(SettingsExport.defaults().mouseMoveModifierKey, .option)
+        XCTAssertEqual(SettingsExport.defaults().gestures.mouseMoveModifierKey, .option)
         XCTAssertTrue(
             String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
                 .contains("mouseMoveModifierKey = \"option\"")
@@ -435,10 +491,10 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         for modifier in [MouseMoveModifierKey.off, .controlOption] {
             var export = SettingsExport.defaults()
-            export.mouseMoveModifierKey = modifier
+            export.gestures.mouseMoveModifierKey = modifier
             let data = try SettingsTOMLCodec.encode(export)
 
-            XCTAssertEqual(try SettingsTOMLCodec.decode(data).mouseMoveModifierKey, modifier)
+            XCTAssertEqual(try SettingsTOMLCodec.decode(data).gestures.mouseMoveModifierKey, modifier)
         }
     }
 
@@ -455,27 +511,27 @@ final class SettingsTOMLCodecTests: XCTestCase {
     @MainActor
     func testMouseMoveModifierStoreMappingRoundTrips() {
         let source = makeSettingsStore()
-        source.mouseMoveModifierKey = .controlCommand
+        source.gestures.mouseMoveModifierKey = .controlCommand
         let destination = makeSettingsStore()
 
         destination.applyExport(source.toExport())
 
-        XCTAssertEqual(destination.mouseMoveModifierKey, .controlCommand)
-        XCTAssertEqual(destination.toExport().mouseMoveModifierKey, .controlCommand)
+        XCTAssertEqual(destination.gestures.mouseMoveModifierKey, .controlCommand)
+        XCTAssertEqual(destination.toExport().gestures.mouseMoveModifierKey, .controlCommand)
     }
 
     @MainActor
     func testRaiseOnMouseFocusStoreMappingSurvivesDisabledFocusFollowsMouse() {
         let source = makeSettingsStore()
-        source.focusFollowsMouse = false
-        source.raiseOnMouseFocus = true
+        source.focus.followsMouse = false
+        source.focus.raiseOnMouseFocus = true
         let destination = makeSettingsStore()
 
         destination.applyExport(source.toExport())
 
-        XCTAssertFalse(destination.focusFollowsMouse)
-        XCTAssertTrue(destination.raiseOnMouseFocus)
-        XCTAssertTrue(destination.toExport().raiseOnMouseFocus)
+        XCTAssertFalse(destination.focus.followsMouse)
+        XCTAssertTrue(destination.focus.raiseOnMouseFocus)
+        XCTAssertTrue(destination.toExport().focus.raiseOnMouseFocus)
     }
 
     func testMalformedMouseMoveModifierTypeRejectsDecode() throws {
@@ -486,16 +542,53 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertThrowsError(try SettingsTOMLCodec.decode(malformed))
     }
 
+    func testOverviewGestureSettingsRoundTripAndExistingConfigDefaults() throws {
+        var export = SettingsExport.defaults()
+        export.gestures.overviewGestureEnabled = true
+        export.gestures.overviewGestureFingerCount = .three
+        let encoded = try SettingsTOMLCodec.encode(export)
+        let decoded = try SettingsTOMLCodec.decode(encoded)
+        XCTAssertEqual(decoded.gestures.overviewGestureEnabled, true)
+        XCTAssertEqual(decoded.gestures.overviewGestureFingerCount, .three)
+
+        let oldConfig = String(decoding: encoded, as: UTF8.self)
+            .split(separator: "\n")
+            .filter { !$0.hasPrefix("overviewGesture") }
+            .joined(separator: "\n")
+        let defaults = try SettingsTOMLCodec.decode(Data(oldConfig.utf8))
+        XCTAssertEqual(defaults.gestures.overviewGestureEnabled, false)
+        XCTAssertEqual(defaults.gestures.overviewGestureFingerCount, .four)
+    }
+
+    @MainActor
+    func testOverviewOnlyGestureAvailabilityFollowsEnablement() {
+        let settings = makeSettingsStore()
+        settings.gestures.scrollEnabled = false
+        settings.gestures.workspaceSwipeEnabled = false
+        var changes: [Bool] = []
+        settings.onTrackpadGestureAvailabilityChanged = { changes.append($0) }
+        settings.gestures.overviewGestureEnabled = true
+        XCTAssertTrue(settings.gestures.trackpadGesturesEnabled)
+        settings.gestures.overviewGestureEnabled = false
+        XCTAssertFalse(settings.gestures.trackpadGesturesEnabled)
+        XCTAssertEqual(changes, [true, false])
+    }
+
+    func testOverviewGestureRejectsUnsupportedFingerCount() throws {
+        let data = try defaultsWithReplacements(("overviewGestureFingerCount = 4", "overviewGestureFingerCount = 2"))
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(data))
+    }
+
     func testWorkspaceSwipeSettingsRoundTrip() throws {
         let defaults = SettingsExport.defaults()
-        XCTAssertFalse(defaults.workspaceSwipeEnabled)
-        XCTAssertEqual(defaults.workspaceSwipeFingerCount, .three)
-        XCTAssertEqual(defaults.workspaceSwipeAxis, .vertical)
+        XCTAssertFalse(defaults.gestures.workspaceSwipeEnabled)
+        XCTAssertEqual(defaults.gestures.workspaceSwipeFingerCount, .three)
+        XCTAssertEqual(defaults.gestures.workspaceSwipeAxis, .vertical)
 
         var export = defaults
-        export.workspaceSwipeEnabled = true
-        export.workspaceSwipeFingerCount = .four
-        export.workspaceSwipeAxis = .horizontal
+        export.gestures.workspaceSwipeEnabled = true
+        export.gestures.workspaceSwipeFingerCount = .four
+        export.gestures.workspaceSwipeAxis = .horizontal
         let data = try SettingsTOMLCodec.encode(export)
         let encoded = String(decoding: data, as: UTF8.self)
 
@@ -504,9 +597,9 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertTrue(encoded.contains("workspaceSwipeAxis = \"horizontal\""))
 
         let decoded = try SettingsTOMLCodec.decode(data)
-        XCTAssertTrue(decoded.workspaceSwipeEnabled)
-        XCTAssertEqual(decoded.workspaceSwipeFingerCount, .four)
-        XCTAssertEqual(decoded.workspaceSwipeAxis, .horizontal)
+        XCTAssertTrue(decoded.gestures.workspaceSwipeEnabled)
+        XCTAssertEqual(decoded.gestures.workspaceSwipeFingerCount, .four)
+        XCTAssertEqual(decoded.gestures.workspaceSwipeAxis, .horizontal)
     }
 
     @MainActor
@@ -518,11 +611,14 @@ final class SettingsTOMLCodecTests: XCTestCase {
             let export = try SettingsTOMLCodec.decode(data)
             let settings = makeSettingsStore()
 
-            XCTAssertFalse(export.scrollSensitivity.isFinite)
+            XCTAssertFalse(export.gestures.scrollSensitivity.isFinite)
             settings.applyExport(export)
 
-            XCTAssertEqual(settings.scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
-            XCTAssertEqual(settings.toExport().scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
+            XCTAssertEqual(settings.gestures.scrollSensitivity, SettingsExport.defaults().gestures.scrollSensitivity)
+            XCTAssertEqual(
+                settings.toExport().gestures.scrollSensitivity,
+                SettingsExport.defaults().gestures.scrollSensitivity
+            )
         }
     }
 
@@ -530,15 +626,15 @@ final class SettingsTOMLCodecTests: XCTestCase {
     func testProgrammaticScrollSensitivityNormalizesBeforeExport() {
         let settings = makeSettingsStore()
 
-        settings.scrollSensitivity = .nan
-        XCTAssertEqual(settings.scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
-        settings.scrollSensitivity = .infinity
-        XCTAssertEqual(settings.scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
-        settings.scrollSensitivity = 0
-        XCTAssertEqual(settings.scrollSensitivity, 0.1)
-        settings.scrollSensitivity = 101
-        XCTAssertEqual(settings.scrollSensitivity, 100)
-        XCTAssertEqual(settings.toExport().scrollSensitivity, 100)
+        settings.gestures.scrollSensitivity = .nan
+        XCTAssertEqual(settings.gestures.scrollSensitivity, SettingsExport.defaults().gestures.scrollSensitivity)
+        settings.gestures.scrollSensitivity = .infinity
+        XCTAssertEqual(settings.gestures.scrollSensitivity, SettingsExport.defaults().gestures.scrollSensitivity)
+        settings.gestures.scrollSensitivity = 0
+        XCTAssertEqual(settings.gestures.scrollSensitivity, 0.1)
+        settings.gestures.scrollSensitivity = 101
+        XCTAssertEqual(settings.gestures.scrollSensitivity, 100)
+        XCTAssertEqual(settings.toExport().gestures.scrollSensitivity, 100)
     }
 
     @MainActor
@@ -565,117 +661,27 @@ final class SettingsTOMLCodecTests: XCTestCase {
         }
     }
 
-    func testWindowGestureDefaultsEncodeAndRoundTrip() throws {
-        let defaults = SettingsExport.defaults()
-        XCTAssertFalse(defaults.windowMoveGestureEnabled)
-        XCTAssertEqual(defaults.windowMoveGestureFingerCount, .four)
-        XCTAssertFalse(defaults.windowResizeGestureEnabled)
-        XCTAssertEqual(defaults.windowResizeGestureFingerCount, .three)
-        XCTAssertEqual(defaults.windowGestureSensitivity, 1.0)
-
-        let canonical = String(decoding: try SettingsTOMLCodec.encode(defaults), as: UTF8.self)
-        for line in [
-            "windowMoveEnabled = false",
-            "windowMoveFingerCount = 4",
-            "windowResizeEnabled = false",
-            "windowResizeFingerCount = 3",
-            "windowGestureSensitivity = 1.0"
-        ] {
-            XCTAssertTrue(canonical.contains(line), line)
-        }
-
-        var export = defaults
-        export.windowMoveGestureEnabled = true
-        export.windowMoveGestureFingerCount = .three
-        export.windowResizeGestureEnabled = true
-        export.windowResizeGestureFingerCount = .two
-        export.windowGestureSensitivity = 2.5
-        XCTAssertEqual(try SettingsTOMLCodec.decode(try SettingsTOMLCodec.encode(export)), export)
-    }
-
-    @MainActor
-    func testWindowGestureStoreMappingRoundTripsAndNormalizesSensitivity() {
-        let source = makeSettingsStore()
-        source.windowMoveGestureEnabled = true
-        source.windowMoveGestureFingerCount = .two
-        source.windowResizeGestureEnabled = true
-        source.windowResizeGestureFingerCount = .four
-        source.windowGestureSensitivity = 0.5
-
-        let destination = makeSettingsStore()
-        destination.applyExport(source.toExport())
-        XCTAssertTrue(destination.windowMoveGestureEnabled)
-        XCTAssertEqual(destination.windowMoveGestureFingerCount, .two)
-        XCTAssertTrue(destination.windowResizeGestureEnabled)
-        XCTAssertEqual(destination.windowResizeGestureFingerCount, .four)
-        XCTAssertEqual(destination.windowGestureSensitivity, 0.5)
-
-        destination.windowGestureSensitivity = .nan
-        XCTAssertEqual(destination.windowGestureSensitivity, SettingsExport.defaults().windowGestureSensitivity)
-        destination.windowGestureSensitivity = 0
-        XCTAssertEqual(destination.windowGestureSensitivity, 0.1)
-        destination.windowGestureSensitivity = 50
-        XCTAssertEqual(destination.windowGestureSensitivity, 5.0)
-    }
-
-    @MainActor
-    func testWindowGesturesToggleTrackpadGestureAvailability() {
-        let settings = makeSettingsStore()
-        settings.scrollGestureEnabled = false
-        settings.workspaceSwipeEnabled = false
-        XCTAssertFalse(settings.trackpadGesturesAvailable)
-
-        var notifications: [Bool] = []
-        settings.onTrackpadGestureAvailabilityChanged = { notifications.append($0) }
-
-        settings.windowMoveGestureEnabled = true
-        XCTAssertTrue(settings.trackpadGesturesAvailable)
-        settings.windowResizeGestureEnabled = true
-        settings.windowMoveGestureEnabled = false
-        XCTAssertTrue(settings.trackpadGesturesAvailable)
-        settings.windowResizeGestureEnabled = false
-        XCTAssertFalse(settings.trackpadGesturesAvailable)
-        XCTAssertEqual(notifications, [true, false])
-    }
-
-    @MainActor
-    func testWindowGestureShadowingReportsClaimedFingerCounts() {
-        let settings = makeSettingsStore()
-        settings.scrollGestureEnabled = true
-        settings.gestureFingerCount = .three
-        XCTAssertNil(settings.windowGestureShadowing(fingerCount: .three))
-
-        settings.windowResizeGestureEnabled = true
-        settings.windowResizeGestureFingerCount = .three
-        XCTAssertEqual(settings.windowGestureShadowing(fingerCount: .three), .windowResize)
-        XCTAssertNil(settings.windowGestureShadowing(fingerCount: .four))
-
-        settings.windowMoveGestureEnabled = true
-        settings.windowMoveGestureFingerCount = .three
-        XCTAssertEqual(settings.windowGestureShadowing(fingerCount: .three), .windowMove)
-    }
-
     @MainActor
     func testHorizontalWorkspaceSwipeSelectionSurvivesFingerCountCollision() {
         var export = SettingsExport.defaults()
-        export.scrollGestureEnabled = true
-        export.gestureFingerCount = .three
-        export.workspaceSwipeEnabled = true
-        export.workspaceSwipeFingerCount = .three
-        export.workspaceSwipeAxis = .horizontal
+        export.gestures.scrollEnabled = true
+        export.gestures.fingerCount = .three
+        export.gestures.workspaceSwipeEnabled = true
+        export.gestures.workspaceSwipeFingerCount = .three
+        export.gestures.workspaceSwipeAxis = .horizontal
 
         let settings = makeSettingsStore()
         settings.applyExport(export)
 
-        XCTAssertEqual(settings.workspaceSwipeAxis, .horizontal)
-        XCTAssertTrue(settings.workspaceSwipeAxisLockedToVertical)
-        XCTAssertEqual(settings.effectiveWorkspaceSwipeAxis, .vertical)
+        XCTAssertEqual(settings.gestures.workspaceSwipeAxis, .horizontal)
+        XCTAssertTrue(settings.gestures.workspaceSwipeAxisLockedToVertical)
+        XCTAssertEqual(settings.gestures.effectiveWorkspaceSwipeAxis, .vertical)
 
-        settings.workspaceSwipeFingerCount = .four
+        settings.gestures.workspaceSwipeFingerCount = .four
 
-        XCTAssertEqual(settings.workspaceSwipeAxis, .horizontal)
-        XCTAssertFalse(settings.workspaceSwipeAxisLockedToVertical)
-        XCTAssertEqual(settings.effectiveWorkspaceSwipeAxis, .horizontal)
+        XCTAssertEqual(settings.gestures.workspaceSwipeAxis, .horizontal)
+        XCTAssertFalse(settings.gestures.workspaceSwipeAxisLockedToVertical)
+        XCTAssertEqual(settings.gestures.effectiveWorkspaceSwipeAxis, .horizontal)
     }
 
     func testMalformedWorkspaceSwipeTypesRejectDecode() throws {
@@ -711,9 +717,9 @@ final class SettingsTOMLCodecTests: XCTestCase {
             ),
             autosaveEnabled: false
         )
-        settings.workspaceSwipeEnabled = true
-        settings.workspaceSwipeFingerCount = .four
-        settings.workspaceSwipeAxis = .horizontal
+        settings.gestures.workspaceSwipeEnabled = true
+        settings.gestures.workspaceSwipeFingerCount = .four
+        settings.gestures.workspaceSwipeAxis = .horizontal
         var externalReloadCount = 0
         settings.onExternalSettingsReloaded = {
             externalReloadCount += 1
@@ -727,9 +733,9 @@ final class SettingsTOMLCodecTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
 
         XCTAssertEqual(externalReloadCount, 0)
-        XCTAssertTrue(settings.workspaceSwipeEnabled)
-        XCTAssertEqual(settings.workspaceSwipeFingerCount, .four)
-        XCTAssertEqual(settings.workspaceSwipeAxis, .horizontal)
+        XCTAssertTrue(settings.gestures.workspaceSwipeEnabled)
+        XCTAssertEqual(settings.gestures.workspaceSwipeFingerCount, .four)
+        XCTAssertEqual(settings.gestures.workspaceSwipeAxis, .horizontal)
 
         let valid = try SettingsTOMLCodec.encode(.defaults())
         try valid.write(to: persistence.fileURL, options: .atomic)
@@ -739,57 +745,57 @@ final class SettingsTOMLCodecTests: XCTestCase {
         }
 
         XCTAssertEqual(externalReloadCount, 1)
-        XCTAssertFalse(settings.workspaceSwipeEnabled)
-        XCTAssertEqual(settings.workspaceSwipeFingerCount, .three)
-        XCTAssertEqual(settings.workspaceSwipeAxis, .vertical)
+        XCTAssertFalse(settings.gestures.workspaceSwipeEnabled)
+        XCTAssertEqual(settings.gestures.workspaceSwipeFingerCount, .three)
+        XCTAssertEqual(settings.gestures.workspaceSwipeAxis, .vertical)
     }
 
     func testFocusLockModifierRoundTrips() throws {
-        XCTAssertEqual(SettingsExport.defaults().focusLockModifier, .off)
+        XCTAssertEqual(SettingsExport.defaults().focus.lockModifier, .off)
         XCTAssertTrue(
             String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
                 .contains("lockModifier = \"off\"")
         )
 
         var export = SettingsExport.defaults()
-        export.focusLockModifier = .leftOption
+        export.focus.lockModifier = .leftOption
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("lockModifier = \"leftOption\""))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(data).focusLockModifier, .leftOption)
+        XCTAssertEqual(try SettingsTOMLCodec.decode(data).focus.lockModifier, .leftOption)
     }
 
     func testFocusCrossesMonitorAtEdgeRoundTrips() throws {
-        XCTAssertFalse(SettingsExport.defaults().focusCrossesMonitorAtEdge)
+        XCTAssertFalse(SettingsExport.defaults().focus.crossesMonitorAtEdge)
 
         var export = SettingsExport.defaults()
-        export.focusCrossesMonitorAtEdge = true
+        export.focus.crossesMonitorAtEdge = true
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("crossesMonitorAtEdge = true"))
-        XCTAssertTrue(try SettingsTOMLCodec.decode(data).focusCrossesMonitorAtEdge)
+        XCTAssertTrue(try SettingsTOMLCodec.decode(data).focus.crossesMonitorAtEdge)
     }
 
     func testMoveCrossesMonitorAtEdgeRoundTrips() throws {
-        XCTAssertFalse(SettingsExport.defaults().moveCrossesMonitorAtEdge)
+        XCTAssertFalse(SettingsExport.defaults().focus.moveCrossesMonitorAtEdge)
 
         var export = SettingsExport.defaults()
-        export.moveCrossesMonitorAtEdge = true
+        export.focus.moveCrossesMonitorAtEdge = true
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("moveCrossesMonitorAtEdge = true"))
-        XCTAssertTrue(try SettingsTOMLCodec.decode(data).moveCrossesMonitorAtEdge)
+        XCTAssertTrue(try SettingsTOMLCodec.decode(data).focus.moveCrossesMonitorAtEdge)
     }
 
     func testCursorContainmentRoundTrips() throws {
-        XCTAssertFalse(SettingsExport.defaults().cursorContainmentEnabled)
+        XCTAssertFalse(SettingsExport.defaults().mouseWarp.constrainToArrangement)
 
         var export = SettingsExport.defaults()
-        export.cursorContainmentEnabled = true
+        export.mouseWarp.constrainToArrangement = true
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("constrainToArrangement = true"))
-        XCTAssertTrue(try SettingsTOMLCodec.decode(data).cursorContainmentEnabled)
+        XCTAssertTrue(try SettingsTOMLCodec.decode(data).mouseWarp.constrainToArrangement)
     }
 
     func testUnknownEnumValueRejectsWholeFile() throws {
@@ -853,16 +859,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
                 "workspaceSwipeAxis = \"\(WorkspaceSwipeAxis.vertical.rawValue)\"",
                 "workspaceSwipeAxis = \"diagonal\"",
                 "workspaceSwipeAxis"
-            ),
-            (
-                "windowMoveFingerCount = \(GestureFingerCount.four.rawValue)\n",
-                "windowMoveFingerCount = 5\n",
-                "windowMoveFingerCount"
-            ),
-            (
-                "windowResizeFingerCount = \(GestureFingerCount.three.rawValue)\n",
-                "windowResizeFingerCount = 1\n",
-                "windowResizeFingerCount"
             ),
             (
                 "position = \"\(QuakeTerminalPosition.center.rawValue)\"",

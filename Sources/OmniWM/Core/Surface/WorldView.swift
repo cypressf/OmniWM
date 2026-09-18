@@ -59,7 +59,7 @@ struct WorldView {
     }
 
     var borderConfig: BorderConfig {
-        BorderConfig.from(settings: controller.settings)
+        BorderConfig.from(settings: controller.settings, isDark: controller.borderUsesDarkAppearance)
     }
 
     func entry(for token: WindowToken) -> WindowState? {
@@ -90,12 +90,16 @@ struct WorldView {
         return infos
     }
 
+    var tabRailStyle: TabRailStyle {
+        controller.tabRailStyle
+    }
+
     func barSurfaces() -> [DesiredBarSurface] {
         guard controller.hasWorkspaceBarDataConsumers else { return [] }
         let settings = controller.settings
         var bars: [DesiredBarSurface] = []
         for monitor in controller.workspaceManager.monitors {
-            let resolved = settings.resolvedBarSettings(for: monitor)
+            let resolved = settings.workspaceBar.resolved(for: monitor)
             let geometry = WorkspaceBarGeometry.resolve(monitor: monitor, resolved: resolved, isVisible: true)
             let projection = controller.workspaceBarProjection(
                 for: monitor,
@@ -110,6 +114,11 @@ struct WorldView {
                         showLabels: resolved.showLabels,
                         showSystemStatsButton: resolved.systemStatsButton,
                         backgroundOpacity: resolved.backgroundOpacity,
+                        inactiveIconOpacity: resolved.inactiveIconOpacity,
+                        transparentBackground: resolved.transparentBackground,
+                        solidBlackBackground: resolved.solidBlackBackground,
+                        showItemBackgrounds: resolved.showItemBackgrounds,
+                        showAccentHighlights: resolved.showAccentHighlights,
                         barHeight: geometry.barHeight,
                         accentColor: resolved.accentColor,
                         textColor: resolved.textColor
